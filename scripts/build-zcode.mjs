@@ -146,6 +146,12 @@ async function buildOutputs(skipBuild) {
   }
 
   run("pnpm", ["--filter", "@zcode/cli...", "build"]);
+  // SEA TUI 资产收集器（sea-runtime-package-resolution.mjs）对 workspace 运行时包硬校验
+  // <pkg>/dist/index.js，而 @zcode/shared 的 exports 直指 ./src/index.ts。它虽然已被
+  // tui 的 esbuild 内联，但收集器仍会沿 @zcode/tui → @zcode/contracts → @zcode/shared
+  // 这条依赖链把它当运行时包拷贝，缺失即抛 "Missing @zcode/shared dist files"。
+  // 因此发布构建必须先产出 shared 的 dist，否则 stageTuiRuntime 阶段必然失败。
+  run("pnpm", ["--filter", "@zcode/shared", "build"]);
   await rm(resolve(root, "packages", "server", "dist"), {
     force: true,
     recursive: true,
