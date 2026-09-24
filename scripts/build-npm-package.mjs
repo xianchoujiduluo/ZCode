@@ -28,7 +28,11 @@ const usage = `用法:
   node scripts/build-npm-package.mjs --source <dist/zcode> --out <dir> [--name <pkg>] [--version <v>] [--keep-sourcemap]
 
 参数:
-  --source <path>         build:zcode 的输出目录（含 web/ server/ agent/ bin/ node_modules/）。默认 dist/zcode
+  --source <path>         build:zcode 的输出目录（含 latest.json / install.sh / releases/）。
+                          脚本会自动定位其中的产物根：优先 <source>/zcode，
+                          不存在时把 <source> 本身当产物根。
+                          两种形态都支持的原因是 CI 下载 artifact 后拿到的是
+                          产物内容本身（无 zcode/ 前缀），而本地 dist 是 <dist>/zcode。
   --out <path>            加工后的包输出目录。默认 build/npm
   --name <pkg>            npm 包名。默认 zcode-web-agent
   --version <v>           包版本。默认取根 package.json 的 version
@@ -253,6 +257,31 @@ async function collectBundledDependencies(packageRoot) {
   return Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)));
 }
 
+/**
+ * 定位产物根目录。
+ *
+ * 支持两种形态，因为产物在不同链路里的布局不同：
+ *  - 本地 dist/zcode/zcode（build:zcode 的 .work 结构）
+ *  - CI 下载的 artifact 根（upload-artifact 会把单个 path 当根，丢掉了 zcode/ 前缀）
+ *
+ * 判定依据是产物特征文件 bin/zcode.mjs：存在即为产物根。
+ */
+async function resolvePackageSource(sourceDir) {
+  const candidates = [resolve(sourceDir, "zcode"), sourceDir];
+  for (const candidate of candidates) {
+    try {
+      await stat(resolve(candidate, "bin", "zcode.mjs"));
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(
+    `在 ${sourceDir} 及其 zcode/ 子目录下都找不到 bin/zcode.mjs，` +
+      `请确认 --source 指向 build:zcode 的输出目录或其产物根。`,
+  );
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -260,12 +289,8 @@ async function main() {
     return;
   }
 
-  const sourcePackageRoot = resolve(options.source, "zcode");
-  await stat(sourcePackageRoot).catch(() => {
-    throw new Error(
-      `找不到产物目录 ${sourcePackageRoot}。先运行 pnpm build:zcode，或检查 --source。`,
-    );
-  });
+  const sourcePackageRoot = await resolvePackageSource(options.source);
+  console.log(`[npm] 产物根: ${sourcePackageRoot}`);
 
   const rootPackageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const version = options.version ?? rootPackageJson.version;
