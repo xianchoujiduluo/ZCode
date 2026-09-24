@@ -28,10 +28,15 @@
 
 - `packages/desktop`：Electron main、host、renderer。
 - `packages/web`、`packages/server`：Web 客户端与服务端。
+- `packages/zcode-server-cli`：独立 Server 启动与进程管理。
 - `packages/ui`：共享 React 组件、hooks 与 Zustand store。
 - `packages/services`：业务服务；`packages/rpc`：RPC 框架。
 - `packages/shared`：共享协议与类型；`packages/client`：Agent 客户端 SDK。
-- `apps/zcode-cli`：Agent CLI 与运行时。
+- `packages/provider`、`packages/provider-node`：Provider 公共能力与 Node 侧实现。
+- `packages/model-option-map`：模型选项映射的 tokenizer、compiler 与 evaluator。
+- `packages/zcode-cua`：Computer Use 占位包，当前发行版不含该能力，运行时入口统一报告 unavailable 并 fail closed。
+- `packages/formal-proof`：产品行为状态空间枚举器，本地 Vite 页面。
+- `apps/zcode-cli`：Agent CLI 与运行时；`apps/zcode-cli/packages/*` 为其内部包（`cli` 入口、`core`、`tui`、`adapters`、`contracts` 等），CLI 专项规则见 `apps/zcode-cli/AGENTS.md`。
 - `CONTEXT.md`：插件商店领域词汇；修改相关 UI 前阅读。
 - `DESIGN.md`：UI 设计规范；修改 UI 前阅读。
 
