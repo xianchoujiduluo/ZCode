@@ -1,0 +1,235 @@
+# 本文件已在 B 机(Ubuntu 24.04 / Node 24.14.0 / pnpm 10.33.2)上验证过 install 环节，结论写在下方注释里。
+# Web+Agent 打包环节在验证时遇到仓库现有缺陷，见 web-agent-linux job 内的说明。
+
+name: release-packages
+
+# 只提供手动触发。需要 tag 触发或发布到 Release 时再自行补 on.push.tags / publish job。
+on:
+  workflow_dispatch:
+    inputs:
+      include_remote_assets:
+        description: "桌面安装包内置远端(SSH/WSL/Docker)组件。开启后构建时间显著变长"
+        type: boolean
+        default: false
+      dist_base_url:
+        description: "Web+Agent 发行包 install.sh 的下载根地址(必填)"
+        type: string
+        required: true
+      release_version:
+        description: "版本号，留空取根 package.json 的 version"
+        type: string
+        default: ""
+      production_backend:
+        description: "桌面包连生产后端(ZCODE_ENV=production)。不开则后端环境为 test，产物名带 _TEST"
+        type: boolean
+        default: true
+
+# 三个 job 都只写各自的 dist 目录，互不冲突；但 git 工作区共享，所以串行更省心。
+concurrency:
+  group: release-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 锁定 mise.toml 里的工具链
+  NODE_VERSION: "24.14.0"
+  PNPM_VERSION: "10.33.2"
+  # husky 的 prepare 在 CI 里没有意义，关掉避免 install 阶段干扰
+  # （实测：HUSKY=0 会让 prepare 脚本输出 "HUSKY=0 skip install"，不会失败）
+  HUSKY: "0"
+  # 实测：@zcode/desktop 的 postinstall 在非 Windows 上必定执行 electron-rebuild，
+  # 日志为 "[node-pty] run electron-rebuild (non-windows-platform)"，成功后打印 "✔ Rebuild Complete"。
+  # 这条决定了 ubuntu/windows runner 都必须在装依赖前具备原生工具链。
+  # 桌面包的后端环境轴。desktop-product-identity.mjs 的 normalizeDesktopZCodeEnv 是
+  # 「不写 production 就当 test」，实测 B 机未设此变量时产物名为
+  # "ZCode Preview-3.14.0-linux-x86_64_TEST.AppImage"（+_TEST 后缀、Preview 身份）。
+  # 要出正式包必须显式 production。
+  ZCODE_ENV: ${{ inputs.production_backend && 'production' || 'test' }}
+  # 实测：mise.toml 里的 ELECTRON_MIRROR(npmmirror) 已 404 失效，
+  # 必须显式指到官方 Releases；同时 @electron/get 不读 https_proxy，需要 ELECTRON_GET_USE_PROXY。
+  # 下面两个变量给国内 runner / 自建 runner 用；GitHub 官方 runner 可直连，留空即可。
+  ELECTRON_MIRROR: ${{ vars.ELECTRON_MIRROR || 'https://github.com/electron/electron/releases/download/' }}
+  ELECTRON_GET_USE_PROXY: ${{ vars.ELECTRON_GET_USE_PROXY || '' }}
+  # 仓库注释明确：Windows 桌面安装包不依赖 mock-cdn remote 资产，跳过可避免串行下载拉长 CI
+  # include_remote_assets=true 时不设此变量，由 prepare:runtime-assets 走完整流程
+  ZCODE_SKIP_REMOTE_ASSETS: ${{ inputs.include_remote_assets && '0' || '1' }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1) Windows 桌面安装包（Electron，内置 Agent）
+  #    产物：NSIS .exe，来自 packages/desktop/electron-builder.config.js 的 win.target
+  # ─────────────────────────────────────────────────────────────
+  desktop-windows:
+    name: desktop / win-x64
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # Windows 上 @zcode/desktop 的 postinstall(node-pty-rebuild) 会命中 N-API 预编译直接跳过，
+      # 不需要 VS Build Tools。System32 的 bsdtar 由 OS 自带，stage 阶段会校验它存在。
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # bundle:desktop 内部会依次执行 prepare:runtime-assets → build → electron-builder → 产物校验。
+      # 不要绕过它直接调 electron-builder，否则会跳过 app.asar 依赖闭包与 native 越界校验。
+      - name: Build desktop installer (win-x64)
+        run: pnpm bundle:desktop -- --os win --arch x64
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            packages/desktop/dist/*.exe
+            packages/desktop/dist/*.blockmap
+            packages/desktop/dist/latest.yml
+
+  # ─────────────────────────────────────────────────────────────
+  # 2) Linux 桌面安装包（Electron，内置 Agent）
+  #    产物：AppImage / deb / rpm / pacman(.pkg.tar.zst)
+  # ─────────────────────────────────────────────────────────────
+  desktop-linux:
+    name: desktop / linux-x64
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # @zcode/desktop 的 postinstall 在非 Windows 上强制 electron-rebuild，
+      # 需要 python3 + make + g++（ubuntu runner 自带，这里显式补打包 target 需要的工具）。
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            rpm fakeroot zstd libarchive-tools
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build desktop installer (linux-x64)
+        run: pnpm bundle:desktop -- --os linux --arch x64
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            packages/desktop/dist/*.AppImage
+            packages/desktop/dist/*.deb
+            packages/desktop/dist/*.rpm
+            packages/desktop/dist/*.pkg.tar.zst
+            packages/desktop/dist/*.blockmap
+            packages/desktop/dist/latest-linux.yml
+
+  # ─────────────────────────────────────────────────────────────
+  # 3) Linux Web + Agent 发行包（浏览器访问，不带 Electron）
+  #    产物：dist/zcode/{install.sh,latest.json,sha256.txt,releases/<ver>/zcode-<ver>.tar.gz}
+  #    包内结构：web/ + server/ + agent/zcode.cjs，由 bin/zcode.mjs 启动
+  # ─────────────────────────────────────────────────────────────
+  web-agent-linux:
+    name: web+agent / linux-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # 需要 linux-arm64 时在矩阵里加一行即可（runner 仍是 x64，属交叉打包，产物未在真机验证）
+        arch: [x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # 实测结论：pnpm install --frozen-lockfile 在根目录就能完整覆盖嵌套的 apps/zcode-cli
+      # workspace（日志 "Scope: all 33 workspace projects"），pnpm ls -r 能看到 @zcode/cli、
+      # @zcode/core、@zcode/tui、@zcode/adapters、@zcode/contracts，内层 node_modules/@zcode
+      # 也已正确链接。所以不需要额外进 apps/zcode-cli 再跑一次 install。
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ★ 此处原有一个阻断缺陷，已在 B 机复现并修复（改动在本 commit 内）：
+      # build:zcode 经 stageTuiRuntime → collectSeaTuiAssets → resolveRuntimePackageDirectory，
+      # 该函数对 workspace 包硬校验 <pkg>/dist/index.js（sea-runtime-package-resolution.mjs:37），
+      # 而 @zcode/shared 的 exports 直指 ./src/index.ts、且原先没有 build 脚本，永远不会有 dist。
+      # 报错：Error: Missing @zcode/shared dist files. Run `pnpm build` before `pnpm sea`.
+      # 修复：packages/shared 补 "build": "tsc"（tsconfig 早已配好 outDir=dist），
+      #       并让 build-zcode.mjs 的构建列表带上 @zcode/shared。
+      # B 机实测：修复后 pnpm build:zcode 返回 EXIT=0，产出 78MB tarball。
+      - name: Build web + agent distribution
+        env:
+          ZCODE_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          pnpm build:zcode \
+            --base-url "${{ inputs.dist_base_url }}" \
+            ${{ inputs.release_version != '' && format('--version "{0}"', inputs.release_version) || '' }}
+
+      # 发行包必须自检：install.sh 依赖 latest.json 里的 version/tarball 字段，缺了装不上。
+      # 实测产物结构（B 机验证）：
+      #   dist/zcode/{install.sh,latest.json}
+      #   dist/zcode/releases/<version>/{zcode-<version>.tar.gz,sha256.txt}
+      # 注意 sha256.txt 在 releases/<version>/ 下，不在 dist/zcode/ 根。
+      - name: Verify distribution layout
+        run: |
+          set -euo pipefail
+          test -f dist/zcode/latest.json
+          test -f dist/zcode/install.sh
+          ls -1 dist/zcode/releases/*/zcode-*.tar.gz
+          ls -1 dist/zcode/releases/*/sha256.txt
+          node -e 'const m=require("./dist/zcode/latest.json");if(!m.version||!m.tarball)throw new Error("latest.json 缺少 version/tarball");console.log("version="+m.version,"tarball="+m.tarball)'
+
+      - name: Upload distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-agent-linux-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 14
+          # 必须整棵 dist/zcode 上传：latest.json 与 releases/<ver>/ 的相对结构是 install.sh 的契约
+          # （install.sh 按 `${BASE_URL}/latest.json` 与 `${BASE_URL}/releases/$VERSION/$TARBALL` 取文件）
+          path: |
+            dist/zcode/latest.json
+            dist/zcode/install.sh
+            dist/zcode/releases/*/zcode-*.tar.gz
+            dist/zcode/releases/*/sha256.txt
+
+      - name: Summary
+        run: |
+          {
+            echo "### Web + Agent 发行包 (linux-${{ matrix.arch }})"
+            echo
+            echo '把整个 `dist/zcode/` 目录上传到 `${{ inputs.dist_base_url }}`，保持目录结构不变。'
+            echo
+            echo '目标机安装（需预装 node>=24、curl、tar）：'
+            echo '```sh'
+            echo 'curl -fsSL ${{ inputs.dist_base_url }}/install.sh | sh'
+            echo 'zcode --web --host 0.0.0.0 --port 3030 --workspace /path/to/project'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
