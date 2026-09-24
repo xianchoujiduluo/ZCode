@@ -203,10 +203,11 @@ jobs:
       # B 机实测：修复后 pnpm build:zcode 返回 EXIT=0，产出 78MB tarball。
       # base-url 必填（缺失时 build-zcode.mjs:241 直接 throw），优先级：
       #   手动触发的 inputs > 仓库变量 ZCODE_DIST_BASE_URL > 报错提示
-      # 注意：GitHub Release 的资产是扁平结构，而生成的 install.sh 硬编码了
-      # ${BASE_URL}/releases/$VERSION/$TARBALL 目录层级，所以这个 base-url 只能指向
-      # 自建/自托管的下载站点（保留 dist/zcode 整棵目录结构），不能直接指向 Release 资产。
-      # Release 上的资产仅作下载分发；如需从 Release 安装，需先设 ZCODE_DIST_BASE_URL。
+      # 该值会写进 install.sh 与 latest.json。自建站点与 GitHub Release 两种布局都支持：
+      # install.sh 会依次探测 <base>/releases/<ver>/<tarball>（自建站点层级布局）
+      # 与 <base>/<tarball>（Release 扁平布局），命中即用（已实测 404 自动回退）。
+      # 所以设成 Release 地址也能一键安装：
+      #   curl -fsSL <base>/install.sh | sh
       - name: Build web + agent distribution
         env:
           ZCODE_TARGET_ARCH: ${{ matrix.arch }}
@@ -284,7 +285,11 @@ jobs:
           {
             echo "### Web + Agent 发行包 (linux-${{ matrix.arch }})"
             echo
-            echo "把整个 \`dist/zcode/\` 目录上传到 \`$DIST_BASE_URL\`，保持目录结构不变。"
+            echo "两种分发方式都可用（install.sh 会自动探测资产布局）："
+            echo
+            echo '1. 自建站点：把整个 `dist/zcode/` 目录上传到 '"$DIST_BASE_URL"'，保持目录结构不变'
+            echo '2. GitHub Release：把 `latest.json`、`install.sh`、`zcode-<ver>.tar.gz`'
+            echo '   作为 Release 资产上传（扁平结构即可）'
             echo
             echo "目标机安装（需预装 node>=24、curl、tar）："
             echo '```sh'
