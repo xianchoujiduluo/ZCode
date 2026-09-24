@@ -258,6 +258,25 @@ jobs:
             dist/zcode/releases/*/zcode-*.tar.gz
             dist/zcode/releases/*/sha256.txt
 
+      # npm 发布需要未打包的产物树（web/ server/ agent/ bin/ node_modules/），
+      # 而上面那份 artifact 只有 tarball。build:zcode 完成后 dist/zcode/.work 会被清掉，
+      # 所以在这里把 tarball 解回一份带 zcode/ 前缀的树，供 publish-npm 使用。
+      - name: Stage package tree for npm
+        run: |
+          set -euo pipefail
+          mkdir -p dist/npm-source
+          tar -xzf dist/zcode/releases/*/zcode-*.tar.gz -C dist/npm-source
+          test -d dist/npm-source/zcode || { echo "::error::解包后缺少 zcode/ 目录" >&2; exit 1; }
+          du -sh dist/npm-source/zcode
+
+      - name: Upload npm source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-source-linux-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
+          path: dist/npm-source/zcode
+
       - name: Summary
         env:
           DIST_BASE_URL: ${{ inputs.dist_base_url || vars.ZCODE_DIST_BASE_URL }}
@@ -297,6 +316,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
+          # 必须排除 npm 源码树：它是 379MB 未打包产物，会被当成 Release 资产上传。
+          # 它的用途只给 publish-npm，不进 Release。
+          pattern: "!npm-source-*"
 
       - name: Flatten assets
         run: |
@@ -348,4 +370,109 @@ jobs:
             echo
             gh release view "$TAG" --json url,assets \
               --jq '"Release: " + .url, "", "| 资产 | 大小 |", "| --- | --- |", (.assets[] | "| " + .name + " | " + ((.size/1048576*10|floor)/10|tostring) + " MiB |")'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────
+  # 5) 发布到 npm（仅 tag 触发）
+  #    与 publish-release 平行：同一个 tag、同一次构建产物，
+  #    分别推到 GitHub Release 与 npm registry 两个独立渠道。
+  #    GitHub Release 没有任何机制能同步到 npm，必须各自 publish。
+  #
+  #    需要 org secret NPM_TOKEN（Automation 类型，否则会被 OTP 卡住）。
+  #    仓库 actions/permissions/workflow 默认只读，npm 发布不需要 contents 写，
+  #    所以此处无需提权。
+  # ─────────────────────────────────────────────────────────
+  publish-npm:
+    name: publish-npm / ${{ github.ref_name }}
+    needs: [web-agent-linux]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # npm publish --provenance 通过 OIDC token 签名来源声明，
+    # 必须显式授予 id-token: write；顶层 permissions 是 contents: read，
+    # job 级权限会覆盖顶层（不是累加），所以这里要把 contents 也写回来。
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # 必须指向公共 registry：setup-node 会把 registry 写进 .npmrc
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download npm source tree
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-source-linux-x64
+          path: npm-source
+
+      # 校验 NPM_TOKEN 存在。缺了就直接失败，不要等到 npm publish 报 401
+      # 才发现（那时包已经打过一遍，白跑几分钟）。
+      - name: Check NPM_TOKEN
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::缺少 org secret NPM_TOKEN。请到组织设置里添加 Automation 类型的 npm token。" >&2
+            exit 1
+          fi
+          echo "NPM_TOKEN 已提供（长度 ${#NPM_TOKEN}）"
+
+      # 不用 install 依赖：build-npm-package.mjs 只依赖 node 内置模块与
+      # scripts/spawn-command.mjs，没有任何第三方依赖。
+      - name: Build npm package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # tag 是 vX.Y.Z，而 npm 版本不能带 v 前缀
+          VERSION="${TAG#v}"
+          node scripts/build-npm-package.mjs \
+            --source npm-source \
+            --out build/npm \
+            --name "${{ vars.NPM_PACKAGE_NAME || 'zcode-web-agent' }}" \
+            --version "$VERSION"
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          TARBALL=$(node -p 'require("./build/npm/npm-pack.json").tarball')
+          NAME=$(node -p 'require("./build/npm/npm-pack.json").name')
+          VERSION=$(node -p 'require("./build/npm/npm-pack.json").version')
+          echo "发布 $NAME@$VERSION ← $TARBALL"
+          # --provenance：本仓库 public 且在 GitHub Actions 上构建，
+          # 可生成可验证的来源声明，用户 npm i 时能看到构建来源。
+          # --access public：无 scope 包默认就是 public，显式写上避免以后改 scope 时踩坑。
+          npm publish "$TARBALL" --provenance --access public
+
+      - name: npm summary
+        run: |
+          {
+            echo "### 已发布到 npm"
+            echo
+            node -e '
+              const m = require("./build/npm/npm-pack.json");
+              console.log(`- 包名: \`${m.name}\``);
+              console.log(`- 版本: \`${m.version}\``);
+              console.log(`- tarball: ${(m.sizeBytes/1048576).toFixed(1)} MiB`);
+              console.log(`- 解压后: ${(m.unpackedBytes/1048576).toFixed(1)} MiB`);
+              console.log(`- sha256: \`${m.sha256}\``);
+              console.log("");
+              console.log("安装：");
+              console.log("```sh");
+              console.log(`npm i -g ${m.name}`);
+              console.log(`${m.name} --web --host 0.0.0.0 --port 3030`);
+              console.log("```");
+            '
           } >> "$GITHUB_STEP_SUMMARY"
