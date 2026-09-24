@@ -1,10 +1,15 @@
-# 本文件已在 B 机(Ubuntu 24.04 / Node 24.14.0 / pnpm 10.33.2)上验证过 install 环节，结论写在下方注释里。
-# Web+Agent 打包环节在验证时遇到仓库现有缺陷，见 web-agent-linux job 内的说明。
+# 本文件已在 B 机(Ubuntu 24.04 / Node 24.14.0 / pnpm 10.33.2)上验证过 install 与打包环节，结论写在下方注释里。
+# 两种触发方式：
+#   1) push tag (v*)  —— 自动出包并创建/更新 GitHub Release
+#   2) workflow_dispatch —— 手动出包，只存 Actions Artifacts，不建 Release
+# 注意：push 触发时 inputs.* 全为空，所有默认值都靠 vars / 字面量兜底，不能只写 inputs。
 
 name: release-packages
 
-# 只提供手动触发。需要 tag 触发或发布到 Release 时再自行补 on.push.tags / publish job。
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       include_remote_assets:
@@ -12,11 +17,11 @@ on:
         type: boolean
         default: false
       dist_base_url:
-        description: "Web+Agent 发行包 install.sh 的下载根地址(必填)"
+        description: "Web+Agent 发行包 install.sh 的下载根地址。留空则读仓库变量 ZCODE_DIST_BASE_URL"
         type: string
-        required: true
+        default: ""
       release_version:
-        description: "版本号，留空取根 package.json 的 version"
+        description: "版本号，留空时：tag 触发取 tag 名(去 v)，手动触发取根 package.json"
         type: string
         default: ""
       production_backend:
@@ -24,10 +29,16 @@ on:
         type: boolean
         default: true
 
-# 三个 job 都只写各自的 dist 目录，互不冲突；但 git 工作区共享，所以串行更省心。
+# 三个构建 job 都只写各自的 dist 目录，互不冲突；但 git 工作区共享，所以串行更省心。
 concurrency:
   group: release-packages-${{ github.ref }}
   cancel-in-progress: false
+
+# 最小权限：构建只需读，只有 publish 需要写 Release（单独在 job 上提权）。
+# 仓库当前 actions/permissions/workflow 的 default_workflow_permissions = read，
+# 不显式提权的话发布 Release 会 403。
+permissions:
+  contents: read
 
 env:
   # 锁定 mise.toml 里的工具链
@@ -43,7 +54,9 @@ env:
   # 「不写 production 就当 test」，实测 B 机未设此变量时产物名为
   # "ZCode Preview-3.14.0-linux-x86_64_TEST.AppImage"（+_TEST 后缀、Preview 身份）。
   # 要出正式包必须显式 production。
-  ZCODE_ENV: ${{ inputs.production_backend && 'production' || 'test' }}
+  # tag 触发时 inputs.production_backend 为空（falsy），所以必须显式区分事件来源，
+  # 否则 tag 发布会被静默降级成 _TEST 测试包。
+  ZCODE_ENV: ${{ github.event_name == 'workflow_dispatch' && (inputs.production_backend && 'production' || 'test') || 'production' }}
   # 实测：mise.toml 里的 ELECTRON_MIRROR(npmmirror) 已 404 失效，
   # 必须显式指到官方 Releases；同时 @electron/get 不读 https_proxy，需要 ELECTRON_GET_USE_PROXY。
   # 下面两个变量给国内 runner / 自建 runner 用；GitHub 官方 runner 可直连，留空即可。
@@ -51,7 +64,8 @@ env:
   ELECTRON_GET_USE_PROXY: ${{ vars.ELECTRON_GET_USE_PROXY || '' }}
   # 仓库注释明确：Windows 桌面安装包不依赖 mock-cdn remote 资产，跳过可避免串行下载拉长 CI
   # include_remote_assets=true 时不设此变量，由 prepare:runtime-assets 走完整流程
-  ZCODE_SKIP_REMOTE_ASSETS: ${{ inputs.include_remote_assets && '0' || '1' }}
+  # tag 触发时 inputs 为空，表达式短路到 '1'（即默认跳过），符合预期
+  ZCODE_SKIP_REMOTE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_remote_assets && '0' || '1' }}
 
 jobs:
   # ─────────────────────────────────────────────────────────────
@@ -155,7 +169,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 需要 linux-arm64 时在矩阵里加一行即可（runner 仍是 x64，属交叉打包，产物未在真机验证）
+        # 需要 linux-arm64 时在矩阵里加一行即可（runner 仍是 x64，属交叉打包，产物未在真机验证）。
+        # 警告：一旦加多架构，flatten 阶段会因 install.sh / latest.json / sha256.txt
+        # 同名而硬失败（publish-release 里会报“资产名冲突”）。到那时需要先给资产加
+        # 架构前缀，或者只发布单架构。
         arch: [x64]
     steps:
       - uses: actions/checkout@v4
@@ -184,13 +201,34 @@ jobs:
       # 修复：packages/shared 补 "build": "tsc"（tsconfig 早已配好 outDir=dist），
       #       并让 build-zcode.mjs 的构建列表带上 @zcode/shared。
       # B 机实测：修复后 pnpm build:zcode 返回 EXIT=0，产出 78MB tarball。
+      # base-url 必填（缺失时 build-zcode.mjs:241 直接 throw），优先级：
+      #   手动触发的 inputs > 仓库变量 ZCODE_DIST_BASE_URL > 报错提示
+      # 注意：GitHub Release 的资产是扁平结构，而生成的 install.sh 硬编码了
+      # ${BASE_URL}/releases/$VERSION/$TARBALL 目录层级，所以这个 base-url 只能指向
+      # 自建/自托管的下载站点（保留 dist/zcode 整棵目录结构），不能直接指向 Release 资产。
+      # Release 上的资产仅作下载分发；如需从 Release 安装，需先设 ZCODE_DIST_BASE_URL。
       - name: Build web + agent distribution
         env:
           ZCODE_TARGET_ARCH: ${{ matrix.arch }}
+          DIST_BASE_URL: ${{ inputs.dist_base_url || vars.ZCODE_DIST_BASE_URL }}
+          # 末尾的 || '' 不可省：手动触发且 release_version 为空时，
+          # (github.event_name == 'push' && ...) 会求值为布尔 false，
+          # 而布尔值渲染成字符串就是 "false"，会让版本号变成 zcode-false.tar.gz。
+          RELEASE_VERSION: ${{ inputs.release_version || (github.event_name == 'push' && github.ref_name) || '' }}
         run: |
-          pnpm build:zcode \
-            --base-url "${{ inputs.dist_base_url }}" \
-            ${{ inputs.release_version != '' && format('--version "{0}"', inputs.release_version) || '' }}
+          set -euo pipefail
+          if [ -z "$DIST_BASE_URL" ]; then
+            echo "::error::缺少 dist_base_url。请传 workflow 输入 dist_base_url，或设置仓库变量 ZCODE_DIST_BASE_URL。" >&2
+            exit 1
+          fi
+          # tag 触发时 tag 名为 vX.Y.Z，而产物的 version 字段不带 v 前缀
+          VERSION="${RELEASE_VERSION#v}"
+          echo "base-url=$DIST_BASE_URL version=$VERSION"
+          if [ -n "$VERSION" ]; then
+            pnpm build:zcode --base-url "$DIST_BASE_URL" --version "$VERSION"
+          else
+            pnpm build:zcode --base-url "$DIST_BASE_URL"
+          fi
 
       # 发行包必须自检：install.sh 依赖 latest.json 里的 version/tarball 字段，缺了装不上。
       # 实测产物结构（B 机验证）：
@@ -221,15 +259,93 @@ jobs:
             dist/zcode/releases/*/sha256.txt
 
       - name: Summary
+        env:
+          DIST_BASE_URL: ${{ inputs.dist_base_url || vars.ZCODE_DIST_BASE_URL }}
         run: |
           {
             echo "### Web + Agent 发行包 (linux-${{ matrix.arch }})"
             echo
-            echo '把整个 `dist/zcode/` 目录上传到 `${{ inputs.dist_base_url }}`，保持目录结构不变。'
+            echo "把整个 \`dist/zcode/\` 目录上传到 \`$DIST_BASE_URL\`，保持目录结构不变。"
             echo
-            echo '目标机安装（需预装 node>=24、curl、tar）：'
+            echo "目标机安装（需预装 node>=24、curl、tar）："
             echo '```sh'
-            echo 'curl -fsSL ${{ inputs.dist_base_url }}/install.sh | sh'
+            echo "curl -fsSL $DIST_BASE_URL/install.sh | sh"
             echo 'zcode --web --host 0.0.0.0 --port 3030 --workspace /path/to/project'
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────
+  # 4) 发布到 GitHub Release（仅 tag 触发）
+  #    用 gh CLI 上传：与 softprops/action-gh-release 相比不用引入外部
+  #    action，且 runner 自带的 gh 已认证。
+  #    资产是扁平结构，与 install.sh 期望的 releases/<ver>/ 层级不同，
+  #    因此 Release 仅作下载分发；装机器需改走自建站点或自设 ZCODE_DIST_BASE_URL。
+  # ─────────────────────────────────────────────────────────
+  publish-release:
+    name: publish / ${{ github.ref_name }}
+    needs: [desktop-windows, desktop-linux, web-agent-linux]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 仓库默认 default_workflow_permissions=read，上传 Release 必须在此显式提权
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten assets
+        run: |
+          set -euo pipefail
+          # download-artifact 会按 artifact 名建子目录，而 Release 资产需要扁平
+          mkdir -p flat
+          find release-assets -type f -print0 | while IFS= read -r -d '' f; do
+            name=$(basename "$f")
+            if [ -e "flat/$name" ]; then
+              echo "::error::资产名冲突: $name（来自 $f）" >&2
+              exit 1
+            fi
+            cp "$f" "flat/$name"
+          done
+          ls -lh flat
+          test -n "$(ls -A flat)" || { echo "::error::没有可发布的资产" >&2; exit 1; }
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 不能用 flat/* 通配：electron-builder 的 Preview 身份 productName 是
+          # "ZCode Preview"（含空格），ZCODE_ENV=test 时产物名如
+          # "ZCode Preview-3.14.0-linux-x86_64_TEST.AppImage"，shell 会把一个文件拆成多个参数。
+          # 用 find -print0 + xargs -0 传递资产列表。
+          mapfile -d '' ASSETS < <(find flat -maxdepth 1 -type f -print0 | sort -z)
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "::error::没有可发布的资产" >&2
+            exit 1
+          fi
+          printf '待上传资产:\n'; printf '  %s\n' "${ASSETS[@]}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" --clobber "${ASSETS[@]}"
+          else
+            # --verify-tag：tag 由本地推送而来，不存在的 tag 不应静默新建
+            gh release create "$TAG" --title "ZCode $TAG" --verify-tag --generate-notes \
+              "${ASSETS[@]}"
+          fi
+
+      - name: Release summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "### 已发布 $TAG"
+            echo
+            gh release view "$TAG" --json url,assets \
+              --jq '"Release: " + .url, "", "| 资产 | 大小 |", "| --- | --- |", (.assets[] | "| " + .name + " | " + ((.size/1048576*10|floor)/10|tostring) + " MiB |")'
           } >> "$GITHUB_STEP_SUMMARY"
