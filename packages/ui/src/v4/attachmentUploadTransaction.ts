@@ -13,6 +13,7 @@ import type {
   ZCodeAgentAttachmentTerminalParams,
 } from "@zcode/services";
 import { logger } from "@/logger.js";
+import { sha256Digest } from "@/lib/sha256Digest.js";
 
 /** 384KiB 可被 3 整除，除末片外 base64 不含 padding；同时为两层 envelope 留足空间。 */
 const ATTACHMENT_UPLOAD_CHUNK_BYTES = 384 * 1024;
@@ -87,13 +88,12 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 async function checksum(bytes: Uint8Array): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error("fault.attachment.checksumUnavailable");
-  // WebCrypto 的 BufferSource 要求 ArrayBuffer；复制也避免调用期间底层 view 被复用。
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", Uint8Array.from(bytes).buffer);
-  const hex = [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-  return `sha256:${hex}`;
+  // 用共享实现而非直接调 crypto.subtle：后者只在 Secure Context（HTTPS / localhost）
+  // 暴露，而本项目还有「内网 http + 局域网 IP」这种部署形态。之前此处缺 subtle 时直接抛
+  // fault.attachment.checksumUnavailable，导致这类环境下附件完全无法上传（发送按钮也
+  // 因为附件停在未就绪而永久禁用）。sha256Digest 会优先走 WebCrypto，不可用时回退到
+  // 纯 JS 实现，结果与服务端 createHash("sha256") 逐字节一致。
+  return await sha256Digest(bytes);
 }
 
 function createUploadId(): string {

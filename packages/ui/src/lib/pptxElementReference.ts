@@ -1,4 +1,5 @@
 import type { PresentationPageElement } from "@/presentation/types.js";
+import { sha256Digest } from "@/lib/sha256Digest.js";
 
 export const PPTX_ELEMENT_REFERENCE_ADD_TO_CHAT_EVENT = "zcode:pptx-element-reference-add-to-chat";
 const PPTX_ELEMENT_COMMENT_BLOCK_TITLE = "# Presentation element comments:";
@@ -142,12 +143,11 @@ function createPptxElementReferenceId() {
 }
 
 export async function sha256Fingerprint(value: ArrayBuffer | string): Promise<string> {
+  // 与 attachment 上传共用同一个实现：crypto.subtle 只在 Secure Context 暴露，
+  // 本仓库存在「内网 http + 局域网 IP」部署形态，这里直接访问会让 PPTX 元素引用功能
+  // 在那些环境下抛错（参考 useTaskSessionFilePath 里同类问题的修法）。
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value);
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  return `sha256:${hex}`;
+  return await sha256Digest(bytes);
 }
 
 export async function createPptxElementReference(options: {
