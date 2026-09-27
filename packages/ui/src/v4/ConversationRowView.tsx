@@ -124,6 +124,7 @@ import { ConversationHookDetailsAction } from "@/v4/ConversationHookDetailsActio
 import { formatModelChangeLabel } from "@/v4/composer/modelTriggerDisplay.js";
 import { formatMessageTimeLabel } from "@/v4/messageTimeLabel.js";
 import { parseConversationShareContext } from "@/lib/conversationShareContext.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 function RowShell({
   rowId,
@@ -176,10 +177,10 @@ const CopyRowAction = memo(function CopyRowAction({
 }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    if (!text || !navigator.clipboard) return;
+    if (!text || !canWriteClipboard()) return;
     void runUserActionAsync({
       input: { featureId: "conversation.history.feedback", action: "copy", trigger: "button" },
-      operation: () => navigator.clipboard.writeText(text),
+      operation: () => writeClipboardText(text),
       completed: { resultSource: "platform_result" },
       failureStage: "clipboard_write",
     }).then(() => {

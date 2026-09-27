@@ -77,6 +77,7 @@ import type {
   WorkspaceFileTreeProps,
   WorkspaceFileTreeStickyFolderItem,
 } from "@/workspace-file-tree/types.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 function getWorkspaceFileTreeDirectoryLoadDepth(
   workspacePath: string,
@@ -443,7 +444,7 @@ export function WorkspaceFileTree({
   ]);
 
   const handleCopyPath = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    if (!canWriteClipboard()) {
       logger.warn("[WorkspaceFileTree] 复制 workspace 路径失败", {
         path: workspacePath,
         error: "clipboard-unavailable",
@@ -451,7 +452,7 @@ export function WorkspaceFileTree({
       return;
     }
     try {
-      await navigator.clipboard.writeText(workspacePath);
+      await writeClipboardText(workspacePath);
       logger.info("[WorkspaceFileTree] workspace 路径已复制", {
         path: workspacePath,
       });

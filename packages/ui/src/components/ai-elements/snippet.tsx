@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 interface SnippetContextType {
   code: string;
@@ -101,7 +102,7 @@ export const SnippetCopyButton = ({
 
     try {
       if (!isCopied) {
-        await navigator.clipboard.writeText(code);
+        await writeClipboardText(code);
         setIsCopied(true);
         onCopy?.();
         timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);

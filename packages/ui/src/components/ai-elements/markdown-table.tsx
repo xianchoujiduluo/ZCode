@@ -27,6 +27,7 @@ import {
 import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 type MarkdownTableNodeProp = {
   node?: unknown;
@@ -1103,7 +1104,7 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
   );
 
   const handleCopyMarkdown = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    if (!canWriteClipboard()) {
       toast(
         intl.formatMessage({ id: "markdownTable.copyFailed" }, { error: "clipboard-unavailable" }),
       );
@@ -1111,7 +1112,7 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
     }
 
     try {
-      await navigator.clipboard.writeText(buildMarkdownTableText(getRows()));
+      await writeClipboardText(buildMarkdownTableText(getRows()));
       toast(intl.formatMessage({ id: "markdownTable.copySucceeded" }));
     } catch (error) {
       toast(

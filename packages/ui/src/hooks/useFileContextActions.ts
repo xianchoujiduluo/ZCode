@@ -5,6 +5,7 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { getContainingDirectoryPath } from "@/lib/path.js";
 import { logger } from "@/logger.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 interface FileContextActionOptions {
   canOpenLocalFileManager?: boolean;
@@ -50,7 +51,7 @@ export function useFileContextActions(options: FileContextActionOptions = {}) {
   );
 
   const copyPathText = useCallback(async (path: string) => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    if (!canWriteClipboard()) {
       logger.warn("[FileContextActions] 复制文件路径失败", {
         path,
         error: "clipboard-unavailable",
@@ -58,7 +59,7 @@ export function useFileContextActions(options: FileContextActionOptions = {}) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(path);
+      await writeClipboardText(path);
       logger.info("[FileContextActions] 文件路径已复制", { path });
     } catch (error) {
       logger.warn("[FileContextActions] 复制文件路径失败", {

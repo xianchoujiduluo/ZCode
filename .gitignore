@@ -71,3 +71,5 @@ packages/desktop/.e2e-network-capture/
 .zcode-runtime/
 # zcode 运行时自动生成的本地忽略文件（内容随个人环境而变，不入库）。
 .zcodeignore
+# zcode 在当前工作目录自动生成的本地配置（如工作区级 hooks），属于机器本地状态。
+.zcode/

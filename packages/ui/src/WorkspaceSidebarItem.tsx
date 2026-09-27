@@ -89,6 +89,7 @@ import {
 } from "@/lib/workspaceRemovalSafety.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { toast } from "@/components/ui/toast.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 export type SortableBindings = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners">;
 
@@ -704,7 +705,7 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
       return;
     }
 
-    navigator.clipboard.writeText(remoteWorkspaceError).then(() => {
+    writeClipboardText(remoteWorkspaceError).then(() => {
       setIsRemoteErrorCopied(true);
       if (remoteErrorCopyResetRef.current !== null) {
         window.clearTimeout(remoteErrorCopyResetRef.current);

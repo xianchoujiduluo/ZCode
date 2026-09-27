@@ -15,6 +15,7 @@ import {
   formatWorkspaceDuration,
   type WorkspaceCardModel,
 } from "@/app-shell/workflowWorkspaceTranscript.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 /** 正文最多画多少行：网关按 32 KB 有界，这里再按行有界——一屏读不完的东西留在 journal 里。 */
 const WORKSPACE_RESULT_MAX_LINES = 200;
@@ -75,7 +76,7 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
     if (text.length === 0) return;
-    void navigator.clipboard?.writeText(text).then(() => {
+    void writeClipboardText(text).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     });

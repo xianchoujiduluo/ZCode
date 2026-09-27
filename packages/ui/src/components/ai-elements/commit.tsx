@@ -13,6 +13,7 @@ import { cn } from "../lib/utils.js";
 import { CheckIcon, CopyIcon, FileIcon, GitCommitIcon, MinusIcon, PlusIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 export type CommitProps = ComponentProps<typeof Collapsible>;
 
@@ -174,7 +175,7 @@ export const CommitCopyButton = ({
 
     try {
       if (!isCopied) {
-        await navigator.clipboard.writeText(hash);
+        await writeClipboardText(hash);
         setIsCopied(true);
         onCopy?.();
         timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);

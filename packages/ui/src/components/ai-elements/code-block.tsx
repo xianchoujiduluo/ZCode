@@ -34,6 +34,7 @@ import { DiagramPreviewDialog } from "@/components/ai-elements/diagram-preview-d
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import type { Theme } from "@/useTheme.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 // Types
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
@@ -475,7 +476,7 @@ export const CodeBlockCopyButton = ({
 
     try {
       if (!isCopied) {
-        await navigator.clipboard.writeText(code);
+        await writeClipboardText(code);
         setIsCopied(true);
         onCopy?.();
         timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);

@@ -45,6 +45,7 @@ export type {
   SavedWorkflowGroupMode,
   SavedWorkflowGroupState,
 } from "@/settings/saved-workflows/savedWorkflowContract.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 interface SavedWorkflowProjectGroupProps {
   project: AutomationWorkspaceOption;
@@ -200,14 +201,13 @@ export function SavedWorkflowProjectGroup({
   );
   const handleCopyPath = useCallback(
     (entry: ZCodeSavedWorkflowEntry) => {
-      void navigator.clipboard
-        ?.writeText(entry.path)
-        .then(() => toast(intl.formatMessage({ id: "workflows.hub.copied" })))
-        .catch((error: unknown) => {
+      void writeClipboardText(entry.path).then((ok) => {
+        if (ok) toast(intl.formatMessage({ id: "workflows.hub.copied" }));
+        else
           logger.warn("[SavedWorkflows] 复制路径失败", {
-            error: error instanceof Error ? error.message : String(error),
+            error: new Error("clipboard write failed"),
           });
-        });
+      });
     },
     [intl],
   );

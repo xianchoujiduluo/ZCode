@@ -34,6 +34,7 @@ import {
   resolveOffPeakTicketExpiredBusinessCode,
 } from "@/lib/providerBusinessError.js";
 import type { ZCodeUiError } from "@/lib/zcodeUiError.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 const HISTORICAL_MODEL_UNAVAILABLE_MESSAGES = [
   "历史任务使用的模型已不可用",
@@ -152,7 +153,7 @@ export function ChatErrorBanner({
   };
 
   const handleCopyError = async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    if (!canWriteClipboard()) {
       toast(
         intl.formatMessage({ id: "chat.error.copyFailed" }, { error: "clipboard-unavailable" }),
       );
@@ -162,7 +163,7 @@ export function ChatErrorBanner({
     try {
       // 错误横幅之前只能复制 TraceID，开发拿不到完整上下文。
       // 这里统一复制摘要、TraceID 和详情，方便用户一键转发完整报错信息。
-      await navigator.clipboard.writeText(
+      await writeClipboardText(
         buildErrorCopyText({
           message: localizedErrorMessage,
           detail: error.detail,

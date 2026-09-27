@@ -27,6 +27,7 @@ import type { PaneWorkspaceScope } from "@/v4/paneLayoutStore.js";
 import type { SessionLease } from "@/v4/sessionDataLayer.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
 import { useV4Conversation, V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 /**
  * 稳定引用的空摘要列表：`artifacts` 键在零产物时**缺席**，坍缩成一个每帧新造的 `[]`
@@ -202,10 +203,9 @@ function WorkflowArtifactView({
     !preset && bytesState.bytes !== null && isTextArtifactContentType(artifact.contentType);
   const handleCopy = useCallback(() => {
     if (bytesState.bytes === null) return;
-    void navigator.clipboard
-      ?.writeText(new TextDecoder().decode(bytesState.bytes))
-      .then(() => setCopied(true))
-      .catch(() => undefined);
+    void writeClipboardText(new TextDecoder().decode(bytesState.bytes)).then((ok) => {
+      if (ok) setCopied(true);
+    });
   }, [bytesState.bytes]);
 
   const title = artifactDisplayTitle(artifact);

@@ -36,6 +36,7 @@ import {
   SavedWorkflowRunHistory,
   type SavedWorkflowRunProject,
 } from "@/settings/saved-workflows/SavedWorkflowRunHistoryPanel.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 type DetailTab = "definition" | "history";
 
@@ -248,7 +249,7 @@ export function SavedWorkflowDetailView({
 
   const copyScript = useCallback(() => {
     if (!detail) return;
-    void navigator.clipboard?.writeText(detail.script).catch(() => undefined);
+    void writeClipboardText(detail.script).catch(() => undefined);
   }, [detail]);
 
   // 「最近产物」条：**最近一次 completed run** 的

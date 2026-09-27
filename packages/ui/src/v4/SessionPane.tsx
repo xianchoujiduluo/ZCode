@@ -281,6 +281,7 @@ import {
   dispatchConversationSelectionAdd,
   type ConversationSelectionReference,
 } from "@/lib/conversationSelectionReference.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 export interface SessionPaneProps {
   paneId: string;
@@ -4172,8 +4173,8 @@ export function SessionPane({
   ]);
 
   const handleCopyPublishedShare = useCallback(() => {
-    if (!publishedShareUrl || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(publishedShareUrl).then(
+    if (!publishedShareUrl || !canWriteClipboard()) return;
+    void writeClipboardText(publishedShareUrl).then(
       () => toast(intl.formatMessage({ id: "conversationShare.copySucceeded" })),
       () => toast(intl.formatMessage({ id: "conversationShare.copyFailed" })),
     );
@@ -4187,11 +4188,11 @@ export function SessionPane({
 
   const handleCopyShareRequestId = useCallback(() => {
     const requestId = shareError?.requestId;
-    if (!requestId || !navigator.clipboard?.writeText) {
+    if (!requestId || !canWriteClipboard()) {
       toast(intl.formatMessage({ id: "conversationShare.copyFailed" }));
       return;
     }
-    void navigator.clipboard.writeText(requestId).then(
+    void writeClipboardText(requestId).then(
       () => toast(intl.formatMessage({ id: "conversationShare.copySucceeded" })),
       () => toast(intl.formatMessage({ id: "conversationShare.copyFailed" })),
     );

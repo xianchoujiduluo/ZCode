@@ -24,6 +24,7 @@ import {
   trajectoryToolOutputs,
   trajectoryToolPayloadErrorText,
 } from "@/ModelTrajectoryToolPayload.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
 
@@ -85,8 +86,8 @@ export function ExpandableTrajectoryMessage({
   const open = userOpen || searchRevealed;
 
   const handleCopy = () => {
-    if (!copyText || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(copyText).catch((error: unknown) => {
+    if (!copyText || !canWriteClipboard()) return;
+    void writeClipboardText(copyText).catch((error: unknown) => {
       logger.warn("[ModelTrajectory] copy expanded content failed", error);
     });
   };

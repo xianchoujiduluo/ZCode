@@ -32,6 +32,7 @@ import type {
   SavedWorkflowsOpenRunParams,
 } from "@/settings/saved-workflows/savedWorkflowContract.js";
 import { selectSavedWorkflowState, useSavedWorkflowStore } from "@/store/savedWorkflowStore.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 interface UseSavedWorkflowGlobalGroupParams {
   refreshSeq: number;
@@ -174,14 +175,13 @@ export function useSavedWorkflowGlobalGroup({
   }, [actionTarget, locale, onCreateViaChat]);
   const handleCopyPath = useCallback(
     (entry: ZCodeSavedWorkflowEntry) => {
-      void navigator.clipboard
-        ?.writeText(entry.path)
-        .then(() => toast(intl.formatMessage({ id: "workflows.hub.copied" })))
-        .catch((error: unknown) => {
+      void writeClipboardText(entry.path).then((ok) => {
+        if (ok) toast(intl.formatMessage({ id: "workflows.hub.copied" }));
+        else
           logger.warn("[SavedWorkflows] 复制路径失败", {
-            error: error instanceof Error ? error.message : String(error),
+            error: new Error("clipboard write failed"),
           });
-        });
+      });
     },
     [intl],
   );

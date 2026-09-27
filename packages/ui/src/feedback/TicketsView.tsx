@@ -11,6 +11,7 @@ import { formatRelativeTime } from "@/feedback/feedbackUserView.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { getErrorMessage } from "@/lib/errorMessage.js";
 import { logger } from "@/logger.js";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 export function TicketsView({
   feedbackService,
@@ -55,7 +56,7 @@ export function TicketsView({
 
   const handleCopyTicketId = useCallback(
     (ticketId: string) => {
-      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      if (!canWriteClipboard()) {
         logger.warn(formatMessage({ id: "feedback.detail.issueCopyFailed" }), {
           issueId: ticketId,
           reason: "clipboard-unavailable",
@@ -63,7 +64,7 @@ export function TicketsView({
         return;
       }
 
-      void navigator.clipboard.writeText(ticketId).then(
+      void writeClipboardText(ticketId).then(
         () => {
           setCopiedTicketId(ticketId);
           if (copiedResetTimerRef.current !== null) {

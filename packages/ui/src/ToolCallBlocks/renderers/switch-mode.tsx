@@ -8,6 +8,7 @@ import { extractPlanToolCallContent, getPlanFileLabel } from "@/lib/planToolCall
 import { ToolSnapshotFieldNotice } from "@/ToolCallBlocks/ToolSnapshotFieldNotice.js";
 import type { ToolCallBlockRenderContext } from "../shared.js";
 import { ArrowRightIcon, CheckIcon, CopyIcon, NotepadTextIcon } from "lucide-react";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 function isInteractiveDescendant(target: EventTarget | null, card: HTMLElement): boolean {
   if (!(target instanceof Element)) return false;
@@ -59,8 +60,8 @@ export function SwitchModeToolCallBlock(context: ToolCallBlockRenderContext) {
   };
 
   const handleCopy = () => {
-    if (!markdown || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(markdown).then(
+    if (!markdown || !canWriteClipboard()) return;
+    void writeClipboardText(markdown).then(
       () => setCopiedMarkdown(markdown),
       () => setCopiedMarkdown(null),
     );

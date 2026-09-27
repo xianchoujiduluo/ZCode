@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 type AnsiProps = {
   children?: string;
@@ -118,7 +119,7 @@ export const TerminalCopyButton = ({
     }
 
     try {
-      await navigator.clipboard.writeText(output);
+      await writeClipboardText(output);
       setIsCopied(true);
       onCopy?.();
       timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);

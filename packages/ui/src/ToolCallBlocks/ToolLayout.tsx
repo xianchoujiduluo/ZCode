@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/tooltip.js";
 import { ToolSummaryRow, type ToolSummaryAction } from "@/ToolCallBlocks/ToolSummaryRow.js";
 import { uiMemoryDiagnosticsRegistry } from "@/lib/memoryDiagnostics.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 
 const toolLayoutOpenState = new Map<string, boolean>();
 // 内存诊断计数器：该表按 toolId 只增不减，先落日志。
@@ -225,7 +226,7 @@ function ToolLayoutComponent({
       return;
     }
 
-    navigator.clipboard.writeText(statusTooltip).then(() => {
+    writeClipboardText(statusTooltip).then(() => {
       setIsFailureTooltipCopied(true);
       if (failureTooltipCopyResetRef.current !== null) {
         window.clearTimeout(failureTooltipCopyResetRef.current);

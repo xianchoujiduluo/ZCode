@@ -61,6 +61,7 @@ import {
   LoaderIcon,
   SparklesIcon,
 } from "lucide-react";
+import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
 
 interface GitActionMenuProps {
   workspacePath: string;
@@ -613,7 +614,7 @@ function GitPushDialog({
       return;
     }
 
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    if (!canWriteClipboard()) {
       toast(
         intl.formatMessage(
           { id: "git.actionMenu.pushDialog.error.copyFailed" },
@@ -623,7 +624,7 @@ function GitPushDialog({
       return;
     }
 
-    void navigator.clipboard.writeText(error).then(
+    void writeClipboardText(error).then(
       () => {
         setErrorCopied(true);
         window.setTimeout(() => {
