@@ -25,20 +25,30 @@ export function evaluateWorkspaceHookEntry(input: {
   const persistent = input.persistentRecords.get(key);
   let trustState: WorkspaceHookTrustState;
 
+  // 本地定制：去掉 Hook 的「授权/审核」环节——新建或修改后的 Hook 直接生效，
+  // 不再进入 pending_trust 并要求用户去命令行（zcode hooks trust grant）或设置页审批。
+  //
+  // 因此这里把原本会落到 pending_trust / stale_digest（声明变了要重新信任）的情况
+  // 一律视作已信任：
+  //   - 作用域为「用户」→ 配置写在 ~/.zcode/cli/config.json，对所有项目生效；
+  //   - 作用域为「工作区」→ 写在项目的 .zcode/config.json，仅对该项目生效。
+  // 两者的生效范围仍由配置文件的加载范围决定（见 config-factory 的优先级），不受此处影响。
+  //
+  // 保留的硬约束（不因本改动放开）：
+  //   - policy.mode === "deny"          → 依然 blocked_policy；
+  //   - trust store 损坏                → 依然 blocked_untrusted；
+  //   - 显式撤销（revokedKeys 命中）    → 依然 revoked。
   if (policy.mode === "deny") {
     trustState = "blocked_policy";
   } else if (input.storeStatus === "corrupt") {
     trustState = "blocked_untrusted";
   } else if (policy.mode === "allow_trusted_only") {
     trustState = persistent ? "trusted_persistent" : "blocked_policy";
-  } else if (persistent) {
-    trustState = "trusted_persistent";
   } else if (input.revokedKeys.has(key)) {
     trustState = "revoked";
-  } else if (hasStaleSlotRecord(snapshot, entry, input.persistentRecords.values())) {
-    trustState = "stale_digest";
   } else {
-    trustState = "pending_trust";
+    // 含 persistent 命中、历史 stale_digest 以及从未信任过的 pending_trust，统一按已信任处理。
+    trustState = "trusted_persistent";
   }
 
   const mapped = WORKSPACE_HOOK_STATE_ADMISSION_MAP[trustState];
@@ -65,35 +75,4 @@ export function evaluateWorkspaceHookEntry(input: {
 
 export function trustKey(workspaceIdentity: string, hookDeclarationDigest: string): string {
   return `${workspaceIdentity}\u0000${hookDeclarationDigest}`;
-}
-
-function hasStaleSlotRecord(
-  snapshot: WorkspaceHookBundleSnapshot,
-  entry: CanonicalWorkspaceHookEntry,
-  records: Iterable<WorkspaceHookTrustRecord>,
-): boolean {
-  const source = snapshot.sourceFiles[entry.sourceFileIndex];
-  if (!source) return false;
-  for (const record of records) {
-    if (record.workspaceIdentity !== snapshot.workspaceIdentity) continue;
-    if (record.hookDeclarationDigest === entry.hookDeclarationDigest) continue;
-    if (
-      record.sourceDiscoveryOrderAtGrant === undefined ||
-      record.matcherIndexAtGrant === undefined ||
-      record.hookIndexAtGrant === undefined
-    ) {
-      continue;
-    }
-    if (
-      record.eventAtGrant === entry.event &&
-      record.sourcePathAtGrant === entry.sourceRelativePath &&
-      record.sourceDiscoveryOrderAtGrant === source.discoveryOrder &&
-      record.matcherAtGrant === entry.matcher &&
-      record.matcherIndexAtGrant === entry.matcherIndex &&
-      record.hookIndexAtGrant === entry.hookIndex
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
