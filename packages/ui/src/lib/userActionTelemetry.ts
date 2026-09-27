@@ -13,6 +13,7 @@ import {
   resolveUserActionCatalogEntry,
   type UserActionFeatureId,
 } from "@/lib/userActionTraceCatalog.js";
+import { randomUuid } from "@/lib/secureRandom.js";
 
 const RENDERER_ACTION_TRACE_MAX_QUEUE_SPANS = 256;
 const RENDERER_ACTION_TRACE_FLUSH_DELAY_MS = 2_000;
@@ -129,7 +130,7 @@ export class RendererUserActionTelemetry implements UserActionTelemetry {
     }
 
     const active: ActiveAction = {
-      actionId: crypto.randomUUID(),
+      actionId: randomUuid(),
       entry,
       input,
       spanId: this.randomHex(8),

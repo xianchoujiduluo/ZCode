@@ -4,6 +4,7 @@ import {
   type LocalTtftPending as Pending,
 } from "@/v4/telemetry/localTtftRecord.js";
 import { logger } from "@/logger.js";
+import { randomUuid } from "@/lib/secureRandom.js";
 import {
   LOCAL_TTFT_MAX_PENDING,
   LOCAL_TTFT_TTL_MS,
@@ -44,7 +45,7 @@ export class LocalTtftObserver {
     if (!this.enabled) return undefined;
     this.expire();
     if (this.readForeground) this.visibility(this.readForeground());
-    const context: LocalTtftContext = { version: 1, observationId: crypto.randomUUID() };
+    const context: LocalTtftContext = { version: 1, observationId: randomUuid() };
     const pending: Pending = {
       context,
       workspace,

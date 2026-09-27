@@ -39,6 +39,7 @@ import { createWorkflowRunTransportMethods } from "@/v4/agentConversationTranspo
 import { createAckActivationBarrier } from "@/v4/ackActivationBarrier.js";
 import { createTopicWireDecoder } from "@/v4/topicWireDecoder.js";
 import { logger } from "@/logger.js";
+import { prefixedRandomUuid } from "@/lib/secureRandom.js";
 import {
   uploadAttachmentTransaction,
   type AttachmentUploadOptions,
@@ -108,7 +109,7 @@ export function createAgentConversationTransport(
     calibrationFlight = agentService
       .queryConversationCommandsV4({
         ...workspace,
-        commands: [{ sessionId: null, commandId: `ttft-clock-${crypto.randomUUID()}` }],
+        commands: [{ sessionId: null, commandId: prefixedRandomUuid("ttft-clock-") }],
         clock: true,
       })
       .then((result) => {
