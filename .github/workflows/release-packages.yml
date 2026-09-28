@@ -28,10 +28,6 @@ on:
         description: "桌面包连生产后端(ZCODE_ENV=production)。不开则后端环境为 test，产物名带 _TEST"
         type: boolean
         default: true
-      probe_oidc:
-        description: "【排障】只跑 npm OIDC 探针，打印 token exchange 的原始响应"
-        type: boolean
-        default: false
 
 # 三个构建 job 都只写各自的 dist 目录，互不冲突；但 git 工作区共享，所以串行更省心。
 concurrency:
@@ -72,104 +68,6 @@ env:
   ZCODE_SKIP_REMOTE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_remote_assets && '0' || '1' }}
 
 jobs:
-  # ─────────────────────────────────────────────────────────────
-  # 【临时排障】npm OIDC 探针
-  #   npm CLI 把 OIDC 的全部错误都用 log.verbose 吞掉（默认不输出），
-  #   上层只会看到 ENEEDAUTH，无法定位。这里手工复现它的两步动作并打印
-  #   服务端原始响应。必须放在本文件内，因为 npm 会校验 OIDC token 的
-  #   job_workflow_ref，换个 workflow 文件名结果就不可信。
-  #   用完即删。
-  # ─────────────────────────────────────────────────────────────
-  oidc-probe:
-    if: github.event_name == 'workflow_dispatch' && inputs.probe_oidc
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Check OIDC env
-        run: |
-          echo "GITHUB_ACTIONS=${GITHUB_ACTIONS:-<unset>}"
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN set: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}"
-          echo "GITHUB_WORKFLOW_REF=$GITHUB_WORKFLOW_REF"
-          echo "GITHUB_REF=$GITHUB_REF"
-          echo "GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
-          echo "GITHUB_REPOSITORY=$GITHUB_REPOSITORY"
-
-      - name: Fetch ID token and dump claims
-        run: |
-          set -euo pipefail
-          RESP=$(curl -sS             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             -H "Accept: application/json" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org")
-          TOKEN=$(printf '%s' "$RESP" | jq -r '.value // empty')
-          if [ -z "$TOKEN" ]; then
-            echo "::error::未取到 id_token，响应：$RESP"
-            exit 1
-          fi
-          echo "id_token 长度: ${#TOKEN}"
-          echo "--- claims ---"
-          # token 是 base64url 且无 padding，GNU base64 -d 会打印正确内容但仍返回非 0，
-          # 在 set -o pipefail 下会打断脚本，所以单独用 python 解码。
-          PAYLOAD=$(printf '%s' "$TOKEN" | cut -d. -f2)
-          python3 -c "
-          import base64, json, sys
-          s = sys.argv[1] + '=' * (-len(sys.argv[1]) % 4)
-          print(json.dumps(json.loads(base64.urlsafe_b64decode(s)), indent=2, ensure_ascii=False))
-          " "$PAYLOAD"
-          printf '%s' "$TOKEN" > "$RUNNER_TEMP/idtoken"
-
-      - name: npm token exchange (raw response)
-        run: |
-          set -euo pipefail
-          TOKEN=$(cat "$RUNNER_TEMP/idtoken")
-          echo "--- POST /-/npm/v1/oidc/token/exchange/package/zcode-web-agent ---"
-          curl -sS -X POST \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Accept: application/json" \
-            -w "\nHTTP_CODE=%{http_code}\n" \
-            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/zcode-web-agent" \
-            | head -40
-
-      - name: npm publish --dry-run (verbose OIDC logs)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/probe-pkg && mkdir -p /tmp/probe-pkg
-          cd /tmp/probe-pkg
-          # 不真发，只是让 npm 走一遍 OIDC 换取流程；--dry-run 下
-          # publish.js 仍会调用 oidc()，但 noCreds 只 warn 不 throw。
-          cat > package.json <<'JSON'
-          { "name": "zcode-web-agent", "version": "0.0.0-probe", "description": "probe" }
-          JSON
-          echo "=== npm publish --dry-run --loglevel silly ==="
-          npm publish --dry-run --loglevel silly 2>&1 \
-            | grep -iE "oidc|token|auth|exchang|ENEEDAUTH|npm error" | head -40 || true
-
-      - name: Query npm trusted publisher config
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          # 端点取自 npm 12 的 `npm trust list` 实现：
-          #   const uri = `/-/package/${spec.escapedName}/trust`
-          echo "=== GET /-/package/zcode-web-agent/trust ==="
-          curl -sS -H "Authorization: Bearer $NPM_TOKEN" \
-            -w "\nHTTP_CODE=%{http_code}\n" \
-            "https://registry.npmjs.org/-/package/zcode-web-agent/trust" | head -40
-          echo
-          echo "=== npm@12 trust list zcode-web-agent ==="
-          # 用 npm 12 的官方命令走 npmFetch 认证路径（含 scope 处理），
-          # 比手写 curl 更接近真实行为。
-          npx -y npm@12 trust list zcode-web-agent 2>&1 | head -40 || true
-          echo
-          echo "=== npm@12 trust list --loglevel verbose ==="
-          npx -y npm@12 trust list zcode-web-agent --loglevel verbose 2>&1 | tail -30 || true
-
-      - name: npm/node version
-        run: npm -v && node -v
   # ─────────────────────────────────────────────────────────────
   # 1) Windows 桌面安装包（Electron，内置 Agent）
   #    产物：NSIS .exe，来自 packages/desktop/electron-builder.config.js 的 win.target
