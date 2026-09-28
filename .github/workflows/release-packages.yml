@@ -110,7 +110,14 @@ jobs:
           fi
           echo "id_token 长度: ${#TOKEN}"
           echo "--- claims ---"
-          printf '%s' "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq .
+          # token 是 base64url 且无 padding，GNU base64 -d 会打印正确内容但仍返回非 0，
+          # 在 set -o pipefail 下会打断脚本，所以单独用 python 解码。
+          PAYLOAD=$(printf '%s' "$TOKEN" | cut -d. -f2)
+          python3 -c "
+          import base64, json, sys
+          s = sys.argv[1] + '=' * (-len(sys.argv[1]) % 4)
+          print(json.dumps(json.loads(base64.urlsafe_b64decode(s)), indent=2, ensure_ascii=False))
+          " "$PAYLOAD"
           printf '%s' "$TOKEN" > "$RUNNER_TEMP/idtoken"
 
       - name: npm token exchange (raw response)
