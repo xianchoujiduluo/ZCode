@@ -160,8 +160,13 @@ jobs:
             -w "\nHTTP_CODE=%{http_code}\n" \
             "https://registry.npmjs.org/-/package/zcode-web-agent/trust" | head -40
           echo
-          echo "=== npm trust list（用 npm 12 的命令行，若可用）==="
-          npm trust list zcode-web-agent 2>&1 | head -30 || true
+          echo "=== npm@12 trust list zcode-web-agent ==="
+          # 用 npm 12 的官方命令走 npmFetch 认证路径（含 scope 处理），
+          # 比手写 curl 更接近真实行为。
+          npx -y npm@12 trust list zcode-web-agent 2>&1 | head -40 || true
+          echo
+          echo "=== npm@12 trust list --loglevel verbose ==="
+          npx -y npm@12 trust list zcode-web-agent --loglevel verbose 2>&1 | tail -30 || true
 
       - name: npm/node version
         run: npm -v && node -v
