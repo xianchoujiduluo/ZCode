@@ -383,7 +383,9 @@ jobs:
   #    分别推到 GitHub Release 与 npm registry 两个独立渠道。
   #    GitHub Release 没有任何机制能同步到 npm，必须各自 publish。
   #
-  #    需要 org secret NPM_TOKEN（Automation 类型，否则会被 OTP 卡住）。
+  #    认证走 npm Trusted Publishing（OIDC）：在包设置里绑定
+  #    GitHub Actions publisher（org=xianchoujiduluo、repo=ZCode、
+  #    workflow=release-packages.yml），不再需要 NPM_TOKEN。
   #    仓库 actions/permissions/workflow 默认只读，npm 发布不需要 contents 写，
   #    所以此处无需提权。
   # ─────────────────────────────────────────────────────────
@@ -393,8 +395,8 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # npm publish --provenance 通过 OIDC token 签名来源声明，
-    # 必须显式授予 id-token: write；顶层 permissions 是 contents: read，
+    # id-token: write 同时支撑两件事：npm Trusted Publishing 的认证换取，
+    # 以及 --provenance 的来源声明签名。顶层 permissions 是 contents: read，
     # job 级权限会覆盖顶层（不是累加），所以这里要把 contents 也写回来。
     permissions:
       contents: read
@@ -410,7 +412,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # 必须指向公共 registry：setup-node 会把 registry 写进 .npmrc
+          # 必须指向公共 registry：setup-node 会把 registry 写进 .npmrc。
+          # 不要配 NODE_AUTH_TOKEN：OIDC trusted publishing 要求 npm 自行换取短时凭证，
+          # 若 npmrc 里带 _authToken，npm 会优先用静态 token，OIDC 反而失效。
           registry-url: "https://registry.npmjs.org"
 
       - name: Download npm source tree
@@ -418,19 +422,6 @@ jobs:
         with:
           name: npm-source-linux-x64
           path: npm-source
-
-      # 校验 NPM_TOKEN 存在。缺了就直接失败，不要等到 npm publish 报 401
-      # 才发现（那时包已经打过一遍，白跑几分钟）。
-      - name: Check NPM_TOKEN
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::缺少 org secret NPM_TOKEN。请到组织设置里添加 Automation 类型的 npm token。" >&2
-            exit 1
-          fi
-          echo "NPM_TOKEN 已提供（长度 ${#NPM_TOKEN}）"
 
       # 不用 install 依赖：build-npm-package.mjs 只依赖 node 内置模块与
       # scripts/spawn-command.mjs，没有任何第三方依赖。
@@ -447,15 +438,15 @@ jobs:
             --name "${{ vars.NPM_PACKAGE_NAME || 'zcode-web-agent' }}" \
             --version "$VERSION"
 
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm (OIDC trusted publishing)
         run: |
           set -euo pipefail
           TARBALL=$(node -p 'require("./build/npm/npm-pack.json").tarball')
           NAME=$(node -p 'require("./build/npm/npm-pack.json").name')
           VERSION=$(node -p 'require("./build/npm/npm-pack.json").version')
           echo "发布 $NAME@$VERSION ← $TARBALL"
+          # 认证走 npm Trusted Publishing：GitHub 签发 OIDC token，npm 侧校验仓库与
+          # workflow 文件名后换取一次性发布凭证，仓库里不再保存长期 token。
           # --provenance：本仓库 public 且在 GitHub Actions 上构建，
           # 可生成可验证的来源声明，用户 npm i 时能看到构建来源。
           # --access public：无 scope 包默认就是 public，显式写上避免以后改 scope 时踩坑。
