@@ -153,15 +153,15 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          echo "=== GET /-/npm/v1/trusted-publishers?package=zcode-web-agent ==="
+          # 端点取自 npm 12 的 `npm trust list` 实现：
+          #   const uri = `/-/package/${spec.escapedName}/trust`
+          echo "=== GET /-/package/zcode-web-agent/trust ==="
           curl -sS -H "Authorization: Bearer $NPM_TOKEN" \
             -w "\nHTTP_CODE=%{http_code}\n" \
-            "https://registry.npmjs.org/-/npm/v1/trusted-publishers?package=zcode-web-agent" | head -30
+            "https://registry.npmjs.org/-/package/zcode-web-agent/trust" | head -40
           echo
-          echo "=== GET /-/npm/v1/trusted-publishing/zcode-web-agent ==="
-          curl -sS -H "Authorization: Bearer $NPM_TOKEN" \
-            -w "\nHTTP_CODE=%{http_code}\n" \
-            "https://registry.npmjs.org/-/npm/v1/trusted-publishing/zcode-web-agent" | head -30
+          echo "=== npm trust list（用 npm 12 的命令行，若可用）==="
+          npm trust list zcode-web-agent 2>&1 | head -30 || true
 
       - name: npm/node version
         run: npm -v && node -v
