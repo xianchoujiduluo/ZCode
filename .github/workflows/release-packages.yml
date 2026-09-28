@@ -132,6 +132,37 @@ jobs:
             "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/zcode-web-agent" \
             | head -40
 
+      - name: npm publish --dry-run (verbose OIDC logs)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/probe-pkg && mkdir -p /tmp/probe-pkg
+          cd /tmp/probe-pkg
+          # 不真发，只是让 npm 走一遍 OIDC 换取流程；--dry-run 下
+          # publish.js 仍会调用 oidc()，但 noCreds 只 warn 不 throw。
+          cat > package.json <<'JSON'
+          { "name": "zcode-web-agent", "version": "0.0.0-probe", "description": "probe" }
+          JSON
+          echo "=== npm publish --dry-run --loglevel silly ==="
+          npm publish --dry-run --loglevel silly 2>&1 \
+            | grep -iE "oidc|token|auth|exchang|ENEEDAUTH|npm error" | head -40 || true
+
+      - name: Query npm trusted publisher config
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "=== GET /-/npm/v1/trusted-publishers?package=zcode-web-agent ==="
+          curl -sS -H "Authorization: Bearer $NPM_TOKEN" \
+            -w "\nHTTP_CODE=%{http_code}\n" \
+            "https://registry.npmjs.org/-/npm/v1/trusted-publishers?package=zcode-web-agent" | head -30
+          echo
+          echo "=== GET /-/npm/v1/trusted-publishing/zcode-web-agent ==="
+          curl -sS -H "Authorization: Bearer $NPM_TOKEN" \
+            -w "\nHTTP_CODE=%{http_code}\n" \
+            "https://registry.npmjs.org/-/npm/v1/trusted-publishing/zcode-web-agent" | head -30
+
       - name: npm/node version
         run: npm -v && node -v
   # ─────────────────────────────────────────────────────────────
