@@ -133,6 +133,30 @@ ln -sfn "$TARGET" "$INSTALL_DIR/current"
 
 cat > "$BIN_DIR/zcode" <<SH
 #!/usr/bin/env sh
+set -eu
+
+# 发行包默认下载根地址（由 install.sh 生成时写入；运行时可用 ZCODE_DIST_BASE_URL 覆盖）。
+DIST_BASE_URL_DEFAULT='${baseUrl}'
+
+# zcode update：重新下载并执行同一个 install.sh。
+# 不在启动器里内联安装逻辑，否则它和 install.sh 会各自演化，升级语义迟早分叉。
+if [ "\\\${1:-}" = "update" ]; then
+  shift
+  BASE="\\\${ZCODE_DIST_BASE_URL:-\\\$DIST_BASE_URL_DEFAULT}"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "zcode update 需要 curl" >&2
+    exit 1
+  fi
+  echo "zcode update: 从 \\\${BASE%/} 检查更新..."
+  TMP_SCRIPT="\\\$(mktemp)"
+  trap 'rm -f "\\$TMP_SCRIPT"' EXIT
+  # 先落盘再执行：管道形式 (curl | sh) 会丢掉 curl 的退出码，下载失败时
+  # 仍会以 0 退出，调用方（脚本/CI）会误判为更新成功。
+  curl -fsSL "\\\${BASE%/}/install.sh" -o "\\$TMP_SCRIPT"
+  sh "\\$TMP_SCRIPT"
+  exit 0
+fi
+
 exec node "$INSTALL_DIR/current/bin/zcode.mjs" "\\$@"
 SH
 chmod +x "$BIN_DIR/zcode"
