@@ -412,10 +412,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # 必须指向公共 registry：setup-node 会把 registry 写进 .npmrc。
-          # 不要配 NODE_AUTH_TOKEN：OIDC trusted publishing 要求 npm 自行换取短时凭证，
-          # 若 npmrc 里带 _authToken，npm 会优先用静态 token，OIDC 反而失效。
-          registry-url: "https://registry.npmjs.org"
+          # 刻意不配 registry-url。setup-node 一旦拿到 registry-url 却没拿到 token，
+          # 会往 .npmrc 写 _authToken=XXXXX-XXXXX-XXXXX-XXXXX（字面量占位符）。
+          # npm 看到 _authToken 就优先用静态 token，不再走 OIDC，PUT 会以
+          # "404 Not Found - PUT .../zcode-web-agent" 失败（npm 对权限问题统一回 404）。
+          # npm 默认 registry 就是 registry.npmjs.org，公共包无需显式配置。
 
       - name: Download npm source tree
         uses: actions/download-artifact@v4
