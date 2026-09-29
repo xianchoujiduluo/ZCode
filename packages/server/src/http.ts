@@ -317,6 +317,37 @@ export function createHttpServer(
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
   app.post("/api/rpc-host-capability", (c) => c.json(hostCapabilities.issue()));
 
+  // 手机扫码配对：凭已通过校验的 cookie 换一条带 token 的访问链接。
+  // zcode_lite_token 是 HttpOnly 的，前端读不到、无法自行拼二维码，只能由这里出。
+  // 本端点位于 /api/ 下，无有效 token 时上面的中间件已返回 401，不会向未授权方泄漏。
+  app.get("/api/pairing-link", (c) => {
+    const url = new URL(c.req.url);
+    // 前端传自己看到的 origin（window.location.origin）最可靠——手机要与桌面用同一地址访问；
+    // 缺省回退 Host 头。反向代理场景下 x-forwarded-host 优先。
+    const paramOrigin = url.searchParams.get("origin")?.trim();
+    const hostHeader =
+      c.req.header("x-forwarded-host")?.trim() || c.req.header("host")?.trim() || "";
+    let base = "";
+    if (paramOrigin) {
+      base = /^https?:\/\/[^/]+$/u.test(paramOrigin) ? paramOrigin : "";
+    }
+    if (!base && hostHeader) {
+      const forwardedProto = c.req.header("x-forwarded-proto")?.trim();
+      const proto =
+        forwardedProto === "https" || forwardedProto === "http" ? forwardedProto : "http";
+      base = `${proto}://${hostHeader}`;
+    }
+    if (!base) {
+      return c.json({ error: "Unable to resolve origin" }, 400);
+    }
+    const paramPath = url.searchParams.get("path")?.trim() || "/m";
+    const path = paramPath.startsWith("/") && !paramPath.includes("//") ? paramPath : "/m";
+    const link = authToken
+      ? `${base}${path}?token=${encodeURIComponent(authToken)}`
+      : `${base}${path}`;
+    return c.json({ url: link, tokenRequired: Boolean(authToken) });
+  });
+
   // 普通 `/ws` 永远是 terminal-client；浏览器/任意客户端设置旧 mode header
   // 都不能再把自己提升为 trusted host。
   app.get(

@@ -38,6 +38,7 @@ import {
 } from "@/settings/model-provider-section/ModelConfigHelp.js";
 
 import { ModelEditorAdvanced } from "@/settings/model-provider-section/ModelEditorAdvanced.js";
+import { FetchModelsButton } from "@/settings/model-provider-section/FetchModelsButton.js";
 
 function selectFocusedInputText(event: Pick<FocusEvent<HTMLInputElement>, "currentTarget">) {
   event.currentTarget.select();
@@ -61,6 +62,9 @@ export function ProviderModelMetadataDialog({
   saving = false,
   modelDefaultsLoaded = false,
   onModelIdBlur,
+  fetchModelsBaseUrl,
+  fetchModelsApiKey,
+  fetchModelsHeaders,
 }: {
   mode?: "add" | "edit";
   open: boolean;
@@ -79,6 +83,10 @@ export function ProviderModelMetadataDialog({
   saving?: boolean;
   modelDefaultsLoaded?: boolean;
   onModelIdBlur?: () => void;
+  /** 提供后，模型 ID 一行右侧出现「获取模型」按钮（从 `<baseUrl>/models` 拉列表）。 */
+  fetchModelsBaseUrl?: string;
+  fetchModelsApiKey?: string;
+  fetchModelsHeaders?: Record<string, string>;
 }) {
   const { intl } = useZCodeIntl();
   const [validationAttempt, setValidationAttempt] = useState(0);
@@ -178,25 +186,41 @@ export function ProviderModelMetadataDialog({
                 <label className="mb-1 block text-ui-base text-foreground-subtle">
                   {intl.formatMessage({ id: "settings.modelProvider.modelId" })}
                 </label>
-                <Input
-                  {...TECHNICAL_INPUT_ATTRIBUTES}
-                  type="text"
-                  autoFocus={shouldFocusModelIdInput}
-                  size="lg"
-                  className={cn("font-mono", modelEditorControlStyle(false))}
-                  readOnly={modelIdReadOnly}
-                  value={draft.idValue}
-                  placeholder={intl.formatMessage({
-                    id: "settings.modelProvider.modelId",
-                  })}
-                  onChange={(event) => {
-                    onDraftChange({ idValue: event.target.value });
-                  }}
-                  onBlur={onModelIdBlur}
-                  onCompositionStart={handleCompositionStart}
-                  onCompositionEnd={handleCompositionEnd}
-                  onKeyDown={handleTechnicalInputKeyDown}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    {...TECHNICAL_INPUT_ATTRIBUTES}
+                    type="text"
+                    autoFocus={shouldFocusModelIdInput}
+                    size="lg"
+                    className={cn("min-w-0 flex-1 font-mono", modelEditorControlStyle(false))}
+                    readOnly={modelIdReadOnly}
+                    value={draft.idValue}
+                    placeholder={intl.formatMessage({
+                      id: "settings.modelProvider.modelId",
+                    })}
+                    onChange={(event) => {
+                      onDraftChange({ idValue: event.target.value });
+                    }}
+                    onBlur={onModelIdBlur}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
+                    onKeyDown={handleTechnicalInputKeyDown}
+                  />
+                  {/* 只读态（内置模型）不给拉列表：改不了 ID，选了也只能替换成个人模型。 */}
+                  {fetchModelsBaseUrl && !modelIdReadOnly ? (
+                    <FetchModelsButton
+                      baseUrl={fetchModelsBaseUrl}
+                      {...(fetchModelsApiKey ? { apiKey: fetchModelsApiKey } : {})}
+                      {...(fetchModelsHeaders ? { headers: fetchModelsHeaders } : {})}
+                      disabled={saving}
+                      onSelect={(modelId) => {
+                        onDraftChange({ idValue: modelId });
+                        // 选完立刻解析智能配置，与手动输入失焦行为一致。
+                        onModelIdBlur?.();
+                      }}
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
           </ModelSettingsGroup>

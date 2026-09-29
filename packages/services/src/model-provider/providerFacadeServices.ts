@@ -19,6 +19,7 @@ import {
 import { createServiceDescriptor } from "../descriptors.js";
 import type { ModelConnectivityResult } from "@zcode/shared";
 import { createServiceLogger } from "../logger/serviceLogger.js";
+import { listRemoteModels, type RemoteModelsFetch } from "./listRemoteModels.js";
 
 export type {
   ProviderSettingsProviderView,
@@ -68,6 +69,32 @@ export interface IProviderSettingsService {
   testModelConnectivity(
     input: ProviderSettingsConnectivityRequest,
   ): Promise<ModelConnectivityResult>;
+  /**
+   * 从 Provider 的 OpenAI 兼容 `/models` 端点拉取可选模型列表，供设置页选模型。
+   * 必须在 host 侧发起：浏览器直连供应商地址会被 CORS 拦；host 侧还能复用
+   * 设置里的代理与自定义 CA。
+   */
+  listRemoteModels(input: ListRemoteModelsRequest): Promise<ListRemoteModelsResult>;
+}
+
+export interface ListRemoteModelsRequest {
+  /** Provider 的 API Base URL（用户填的那个，会规范化为 `<base>/models`）。 */
+  readonly baseUrl: string;
+  readonly apiKey?: string;
+  /** 额外请求头（供应商自定义鉴权字段）。 */
+  readonly headers?: Record<string, string>;
+}
+
+export interface ListRemoteModelsResult {
+  readonly models: readonly RemoteModelEntry[];
+  /** 规范化后实际请求的 URL，便于用户排错。 */
+  readonly requestUrl: string;
+}
+
+export interface RemoteModelEntry {
+  readonly id: string;
+  /** 供应商返回的可读名称，缺失时前端回退到 id。 */
+  readonly name?: string;
 }
 
 export const IProviderSettingsService = createServiceDescriptor<IProviderSettingsService>(
@@ -110,6 +137,7 @@ export function createProviderSettingsService(
   facade: ProviderSettingsFacade,
   ensureReady: () => Promise<void> = async () => {},
   testConnectivity?: ProviderSettingsConnectivityTester,
+  remoteModelsFetch?: RemoteModelsFetch,
 ): IProviderSettingsService {
   return {
     onDidChange: toEvent((listener) => facade.onDidChange(listener)),
@@ -205,6 +233,12 @@ export function createProviderSettingsService(
         providerId: input.providerId,
         modelId: input.modelId,
       });
+    },
+    listRemoteModels: async (input) => {
+      if (!remoteModelsFetch) {
+        throw new Error("当前 Environment 未装配远程模型列表能力");
+      }
+      return listRemoteModels(input, { fetch: remoteModelsFetch });
     },
   };
 }

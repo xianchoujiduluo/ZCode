@@ -356,6 +356,8 @@ export function ProviderModelsSection({
   onAddModel,
   onReorderModelIds,
   settingsRevision = 0,
+  fetchModelsBaseUrl,
+  fetchModelsApiKey,
 }: {
   providerId: string;
   providerName?: string;
@@ -373,6 +375,9 @@ export function ProviderModelsSection({
   onAddModel: (model: ProviderSettingsFormModel) => void | Promise<void>;
   onReorderModelIds?: (modelIds: string[]) => void;
   settingsRevision?: number;
+  /** 透传给弹窗的「获取模型」按钮：`<baseUrl>/models` 的拉取参数。 */
+  fetchModelsBaseUrl?: string;
+  fetchModelsApiKey?: string;
 }) {
   const { intl } = useZCodeIntl();
   const { providerSettingsService } = useServices();
@@ -572,6 +577,8 @@ export function ProviderModelsSection({
           saving={addSaving}
           modelConfigResolutionPending={editor.pending}
           modelDefaultsLoaded={editor.defaultsLoaded}
+          {...(fetchModelsBaseUrl ? { fetchModelsBaseUrl } : {})}
+          {...(fetchModelsApiKey ? { fetchModelsApiKey } : {})}
           onModelIdBlur={() => {
             void editor.flush().catch(() => undefined);
           }}

@@ -131,6 +131,22 @@ export function DesktopTopOverlay({
             "pointer-events-auto flex items-center gap-1 shrink-0 [app-region:no-drag]",
           )}
         >
+          {/*
+            Web 端也要有展开入口：收起侧边栏后，上面两个分支都不成立
+            （Web 下 isMacDesktop / isWindowsDesktop / isLinuxDesktop 全是 false），
+            用户会失去唯一的展开手段。这里用中性图标按钮补齐。
+          */}
+          {!isMacDesktop && !usesCustomCaptionArea ? (
+            <DesktopTopOverlayActionButton
+              title={toggleSidebarTitle}
+              shortcut={toggleSidebarShortcutLabel}
+              ariaLabel={toggleSidebarTitle}
+              onClick={onToggleSidebar}
+            >
+              <SidebarToggleIcon className="size-4" />
+            </DesktopTopOverlayActionButton>
+          ) : null}
+
           {usesCustomCaptionArea && (
             <DesktopTopOverlayActionButton
               title={toggleSidebarTitle}

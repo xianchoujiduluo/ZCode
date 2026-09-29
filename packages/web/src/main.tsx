@@ -9,8 +9,10 @@ import {
   setStreamClientId,
   type Theme,
 } from "@zcode/ui";
+import { applyTheme } from "@zcode/ui/useTheme";
 import "@zcode/ui/styles.css";
 import { connectViaWebSocket } from "@zcode/client";
+import { MobileApp } from "./mobile/MobileApp.js";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { createWebAuthService } from "./auth/webAuthService.js";
 import { WEB_ZAI_OAUTH_CONFIG, resolveWebAuthDevReturnTo } from "./auth/webZaiOAuthConfig.js";
@@ -430,6 +432,23 @@ async function bootstrapWebApp() {
 
   if (isConversationSharePath(window.location.pathname)) {
     await renderConversationSharePage();
+    return;
+  }
+
+  // 移动端独立入口：/m（或 /m/ 开头）。不挂 Root，走轻量三视图。
+  if (window.location.pathname === "/m" || window.location.pathname.startsWith("/m/")) {
+    document.title = "ZCode Mobile";
+    // 只有移动端需要 env(safe-area-inset-*) 生效（刘海/底部横条避让）。
+    // 不写进 index.html：桌面 UI 没有安全区适配，开启后顶部会被刘海遮挡。
+    document
+      .querySelector('meta[name="viewport"]')
+      ?.setAttribute("content", "width=device-width, initial-scale=1.0, viewport-fit=cover");
+    applyTheme("zai-dark");
+    root.render(
+      <AppErrorBoundary>
+        <MobileApp />
+      </AppErrorBoundary>,
+    );
     return;
   }
 

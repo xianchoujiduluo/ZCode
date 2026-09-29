@@ -1625,6 +1625,8 @@ export function createLocalServices(options: {
         return providerConnectivityAgentService.testModelConnectivity(input);
       },
     }),
+    // 「获取模型」在 host 侧发请求：绕过浏览器 CORS，并复用设置里的代理与自定义 CA。
+    remoteModelsFetch: hostApiNetworkTransport.fetch,
     disposeAccountSource: () => {
       disposeAccountProviderInvalidation();
       accountProviderRefreshErrorDispose();

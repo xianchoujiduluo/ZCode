@@ -33,7 +33,9 @@ import {
   LogOut,
   Maximize,
   Palette,
+  PanelLeftClose,
   Settings,
+  Smartphone,
   User,
   ZoomIn,
   ZoomOut,
@@ -49,9 +51,32 @@ import {
   WorkspaceSidebarFooterUsageSummaryContent,
   useWorkspaceSidebarFooterUsageSummaryState,
 } from "@/WorkspaceSidebarFooterUsageSummary.js";
+import { MobilePairingDialog } from "@/MobilePairingDialog.js";
 
 const DESKTOP_ZOOM_MIN_LEVEL = -3;
 const DESKTOP_ZOOM_MAX_LEVEL = 5;
+
+/** 手机端配对入口按钮：点击弹出扫码对话框。仅 Web 侧渲染。 */
+function MobilePairingFooterButton() {
+  const { intl } = useZCodeIntl();
+  const [pairingOpen, setPairingOpen] = useState(false);
+  return (
+    <>
+      <ControlHintTooltip title={intl.formatMessage({ id: "mobilePairing.open" })}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          aria-label={intl.formatMessage({ id: "mobilePairing.open" })}
+          onClick={() => setPairingOpen(true)}
+        >
+          <Smartphone className="size-4" />
+        </Button>
+      </ControlHintTooltip>
+      <MobilePairingDialog open={pairingOpen} onOpenChange={setPairingOpen} />
+    </>
+  );
+}
 
 function getSidebarProfileName(user?: UserInfo | null): string {
   const displayName = user?.displayName?.trim();
@@ -93,6 +118,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   onUpgradeClick,
   onLogin,
   onLogout,
+  onToggleSidebar,
   settingsButtonMode = "settings",
   user,
   workspacePath,
@@ -113,6 +139,8 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   >[0]["onUpgradeClick"];
   onLogin?: () => void;
   onLogout?: () => void;
+  /** 收起整个侧边栏（shell 传入；Web/Desktop 通用）。 */
+  onToggleSidebar?: () => void;
   settingsButtonMode?: "settings" | "back";
   user?: UserInfo | null;
   workspacePath?: string;
@@ -173,6 +201,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
     settingsButtonMode === "back"
       ? intl.formatMessage({ id: "workspace.backToWorkspace" })
       : intl.formatMessage({ id: "settings.title" });
+  const collapseSidebarLabel = intl.formatMessage({ id: "sidebar.collapse" });
   const usageButtonClick = onUsageClick ?? onSettingsButtonClick;
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [desktopZoomLevel, setDesktopZoomLevel] = useState(0);
@@ -369,6 +398,21 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="flex shrink-0 items-center gap-1.5">
+          {/* 手机端入口只在 Web 出现：Desktop 没有 HTTP 服务可配对。 */}
+          {isDesktop ? null : <MobilePairingFooterButton />}
+          {onToggleSidebar ? (
+            <ControlHintTooltip title={collapseSidebarLabel}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                aria-label={collapseSidebarLabel}
+                onClick={onToggleSidebar}
+              >
+                <PanelLeftClose className="size-4" />
+              </Button>
+            </ControlHintTooltip>
+          ) : null}
           <ControlHintTooltip title={settingsButtonLabel}>
             <Button
               type="button"

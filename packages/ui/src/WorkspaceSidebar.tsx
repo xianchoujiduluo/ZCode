@@ -248,7 +248,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   isMacDesktop: _isMacDesktop = false,
   isWindowsDesktop = false,
   isSidebarVisible: _isSidebarVisible = true,
-  onToggleSidebar: _onToggleSidebar,
+  onToggleSidebar,
   toggleSidebarShortcutLabel: _toggleSidebarShortcutLabel,
   canGoBack: _canGoBack = false,
   canGoForward: _canGoForward = false,
@@ -1653,6 +1653,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
             onUpgradeClick={handleOpenCodingPlanUpgrade}
             onLogin={onLogin}
             onLogout={onLogout}
+            onToggleSidebar={onToggleSidebar}
             user={user}
             workspacePath={workspacePath}
             workspaceIdentity={workspaceIdentity}
