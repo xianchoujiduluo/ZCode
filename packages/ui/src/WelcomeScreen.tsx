@@ -14,6 +14,7 @@ import {
   TID_OAUTH_ERROR,
   TID_OAUTH_LOGIN_BUTTON,
   ZAI_PROVIDER_ID,
+  ZCODE_VERSION,
   testId,
 } from "@zcode/shared";
 import { Alert, AlertDescription } from "./components/ui/alert.js";
@@ -466,6 +467,8 @@ function LoginPanelHeader({
       <div className="flex flex-col items-center gap-1 text-center">
         <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
         <p className="text-ui-base/relaxed text-foreground-subtle">{description}</p>
+        {/* 版本号紧跟描述文字，不抢视觉焦点；仅展示用，避免引入额外判断。 */}
+        <p className="text-ui-xs text-foreground-subtlest tabular-nums">v{ZCODE_VERSION}</p>
       </div>
       {children}
     </header>

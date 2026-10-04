@@ -13,6 +13,7 @@ import { applyTheme } from "@zcode/ui/useTheme";
 import "@zcode/ui/styles.css";
 import { connectViaWebSocket } from "@zcode/client";
 import { MobileApp } from "./mobile/MobileApp.js";
+import { TokenGate, stripTokenFromUrl, verifyToken } from "./TokenGate.js";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { createWebAuthService } from "./auth/webAuthService.js";
 import { WEB_ZAI_OAUTH_CONFIG, resolveWebAuthDevReturnTo } from "./auth/webZaiOAuthConfig.js";
@@ -189,7 +190,9 @@ async function renderConversationSharePage(): Promise<void> {
   );
 }
 
-function createWebPlatform(): IPlatformService {
+function createWebPlatform(
+  services?: Awaited<ReturnType<typeof connectViaWebSocket>>,
+): IPlatformService {
   return {
     canSelectFilePath: false,
     // Web 端无法打开系统目录选择框
@@ -219,12 +222,29 @@ function createWebPlatform(): IPlatformService {
     listWSLDistros: () => Promise.resolve([]),
     listDockerContainers: () => Promise.resolve([]),
     listSSHConfigAliases: () => Promise.resolve([]),
-    loadMcpFromUserDirectory: () => Promise.resolve({ servers: [] }),
-    saveMcpToUserDirectory: () =>
-      Promise.resolve({
-        success: false,
-        error: "MCP native directory management requires a desktop attachment",
-      }),
+    // Web+Agent 部署的 MCP 用户目录管理走 host 侧 RPC（IMcpSyncService 在
+    // node.ts 注册、写 host 的 ~/.zcode/cli/config.json），与桌面共用一条路。
+    // 没连上 services 时（如 TokenGate 阶段）返回空集/失败，UI 侧已有兜底。
+    loadMcpFromUserDirectory: services
+      ? (payload) => services.mcpSyncService.loadMcpFromUserDirectory(payload)
+      : () => Promise.resolve({ servers: [] }),
+    saveMcpToUserDirectory: services
+      ? async (payload) => {
+          try {
+            await services.mcpSyncService.saveMcpToUserDirectory(payload);
+            return { success: true };
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
+      : () =>
+          Promise.resolve({
+            success: false,
+            error: "MCP native directory management requires a desktop attachment",
+          }),
     migrateLegacyCommonMcp: () =>
       Promise.resolve({
         servers: {},
@@ -423,6 +443,37 @@ function renderWebBootstrapError(error: unknown): void {
   );
 }
 
+/**
+ * 确认当前会话已通过 token 校验。
+ *
+ * 顺序：URL 里的 ?token= 优先（旧链接/扫码进入，自动提交后从地址栏抹掉）；
+ * 否则探测受保护端点，cookie 有效即视为已通过。
+ * 服务未开启鉴权时探测直接 200，不会弹输入框。
+ */
+async function ensureAuthenticated(): Promise<boolean> {
+  const urlToken = new URLSearchParams(window.location.search).get("token");
+  if (urlToken) {
+    try {
+      const result = await verifyToken(urlToken);
+      if (result.ok) {
+        stripTokenFromUrl();
+        return true;
+      }
+    } catch {
+      // 校验请求本身失败时继续走探测；token 仍留在 URL，输入页会再次尝试
+    }
+    // 无效 token：抹掉避免反复提交，交给输入页
+    stripTokenFromUrl();
+  }
+
+  try {
+    const probe = await fetch("/api/server-info", { credentials: "same-origin" });
+    return probe.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function bootstrapWebApp() {
   const params = new URLSearchParams(window.location.search);
   if (isWebOAuthCallback(params)) {
@@ -432,6 +483,17 @@ async function bootstrapWebApp() {
 
   if (isConversationSharePath(window.location.pathname)) {
     await renderConversationSharePage();
+    return;
+  }
+
+  // TokenGate：先消化 URL 里的 ?token=（旧链接/扫码进入时无感通过），
+  // 再探测 cookie 是否已有效。都没过就渲染输入页，URL 中不再保留 token。
+  if (!(await ensureAuthenticated())) {
+    root.render(
+      <AppErrorBoundary>
+        <TokenGate onPass={() => void bootstrapWebApp()} />
+      </AppErrorBoundary>,
+    );
     return;
   }
 
@@ -464,7 +526,7 @@ async function bootstrapWebApp() {
     const services = await connectViaWebSocket(bootstrap.wsUrl, {
       onClose: () => {},
     });
-    const platform = createWebPlatform();
+    const platform = createWebPlatform(services);
     document.title = "ZCode - Web + Server";
 
     root.render(

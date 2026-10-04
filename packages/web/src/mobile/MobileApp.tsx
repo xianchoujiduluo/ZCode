@@ -50,13 +50,6 @@ function formatTime(ts: number): string {
   return `${M}-${D} ${hh}:${mm}`;
 }
 
-/** URL 里带的 ?token= 需要在首个 API 请求中回传，让服务端种 cookie（HttpOnly）。 */
-function tokenQuerySuffix(): string {
-  if (typeof window === "undefined") return "";
-  const t = new URLSearchParams(window.location.search).get("token");
-  return t ? `?token=${encodeURIComponent(t)}` : "";
-}
-
 /* ───────────────────────── 主组件 ── */
 
 /**
@@ -92,7 +85,8 @@ export function MobileApp() {
   // 获取项目列表
   useEffect(() => {
     let disposed = false;
-    fetch(`/api/server-info${tokenQuerySuffix()}`)
+    // token 已在 bootstrapWebApp 的 ensureAuthenticated 里校验并种 cookie，此处无需再带。
+    fetch("/api/server-info")
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         return r.json() as Promise<{ workspaces?: Array<{ path: string; label?: string }> }>;

@@ -305,6 +305,12 @@ export function createHttpServer(
   if (authToken) {
     app.use("*", async (c, next) => {
       const pathname = new URL(c.req.url).pathname;
+      // TokenGate 的两个端点必须豁免：auth-status 告诉前端要不要弹输入框，
+      // verify-token 就是用户提交 token 的入口。它们只操作 cookie，不暴露业务数据。
+      if (pathname === "/api/auth-status" || pathname === "/api/verify-token") {
+        await next();
+        return;
+      }
       const validToken = hasValidLiteToken(c, authToken);
       if (!isTokenProtectedPath(pathname) || validToken) {
         await next();
@@ -313,6 +319,32 @@ export function createHttpServer(
       return c.json({ error: "Unauthorized" }, 401);
     });
   }
+
+  // TokenGate：只告诉前端「这个服务需不需要 token」，不暴露任何其他信息。
+  app.get("/api/auth-status", (c) => c.json({ authRequired: Boolean(authToken) }));
+
+  // TokenGate：用户提交 token 校验。正确时种 HttpOnly cookie，
+  // 之后所有 /api/* 和 /ws 请求凭 cookie 通过，URL 不再携带 ?token=。
+  app.post("/api/verify-token", async (c) => {
+    if (!authToken) {
+      return c.json({ ok: true, authRequired: false });
+    }
+    let body: { token?: unknown };
+    try {
+      body = (await c.req.json()) as { token?: unknown };
+    } catch {
+      return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+    }
+    const submitted = typeof body.token === "string" ? body.token.trim() : "";
+    if (submitted === authToken) {
+      c.header(
+        "Set-Cookie",
+        `${zcodeLiteTokenCookieName}=${encodeURIComponent(authToken)}; Path=/; HttpOnly; SameSite=Lax`,
+      );
+      return c.json({ ok: true, authRequired: true });
+    }
+    return c.json({ ok: false, authRequired: true, error: "Invalid token" }, 401);
+  });
 
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
   app.post("/api/rpc-host-capability", (c) => c.json(hostCapabilities.issue()));
