@@ -160,6 +160,16 @@ export const BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES: readonly BuiltinZCodeSlas
     },
     {
       details: [
+        "Re-reads MCP server config from disk and hot-reloads the current session.",
+        "Newly added servers are connected and their tools registered; removed servers are disconnected.",
+        "Waits for the running turn to finish before reloading; the reload result lists per-server status.",
+      ],
+      name: "reload",
+      summary: "Hot-reload MCP servers for this session.",
+      usage: "/reload",
+    },
+    {
+      details: [
         "In the TUI, opens a checkpoint picker when called without arguments.",
         "Use status to show the latest checkpoint, or latest/a checkpoint id to restore directly.",
       ],

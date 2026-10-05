@@ -25,6 +25,7 @@ import type {
 } from "../deps.js";
 import {
   parseCompactCommand,
+  parseReloadMcpCommand,
   parseRewindCommand,
   createTurnAbortScope,
   throwIfTurnAborted,
@@ -104,6 +105,7 @@ export async function executeTurnCommand(
   const admittedOutputStyle = this.config.outputStyle;
   const compactInstructions = parseCompactCommand(input);
   const rewindCommand = parseRewindCommand(input);
+  const reloadMcpCommand = parseReloadMcpCommand(input);
   const turnId = startReservation?.turnId ?? createTurnId();
   const queryId = options?.queryId ?? (options?.inputId as QueryId | undefined) ?? createQueryId();
   const displayInput = options?.displayInput ?? input;
@@ -188,7 +190,7 @@ export async function executeTurnCommand(
       let admittedModel;
       try {
         admittedModel =
-          rewindCommand === null
+          rewindCommand === null && reloadMcpCommand === null
             ? createTurnModel(this, {
                 requestDependencies: options?.modelExecution?.requestDependencies,
                 selection: admittedModelSelection,
@@ -259,6 +261,17 @@ export async function executeTurnCommand(
         return this.executeRewindCommand(
           input,
           rewindCommand,
+          turnId,
+          turnTraceContext,
+          turnAbortSignal,
+          options?.inputId,
+        );
+      }
+      // /reload 热重载 MCP：不创建模型、不进上下文循环；命令经队列 admission，
+      // 当前 turn 结束后才执行，不会与进行中的工具调用竞争。
+      if (reloadMcpCommand !== null) {
+        return this.executeReloadMcpCommand(
+          input,
           turnId,
           turnTraceContext,
           turnAbortSignal,

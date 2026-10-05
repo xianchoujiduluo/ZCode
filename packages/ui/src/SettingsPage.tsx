@@ -23,6 +23,7 @@ import {
   TID_SETTINGS_PAGE,
   TID_SETTINGS_SECTION_NAV,
   TID_SETTINGS_USAGE_TAB,
+  ZCODE_VERSION,
   testId,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
@@ -1527,6 +1528,11 @@ export function SettingsPage({
                     {intl.formatMessage({ id: "settings.onboarding" })}
                   </span>
                 </SettingsSidebarButton>
+
+                {/* 版本号：放在导航列底部，打开设置即可看到当前运行版本。 */}
+                <div className="px-2.5 pt-3 pb-1 text-ui-xs text-foreground-subtlest tabular-nums">
+                  ZCode v{ZCODE_VERSION}
+                </div>
               </nav>
 
               <div className="max-lg:hidden">

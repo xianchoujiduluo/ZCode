@@ -81,6 +81,7 @@ import { logMemorySkipped } from "./context.js";
 import { injectPluginReferenceReminderFromTurn } from "./plugin-reference.js";
 import { initializeMcp } from "./mcp.js";
 import { startMcpStartup } from "./mcp.js";
+import { executeReloadMcpCommand } from "./mcp-reload.js";
 import { discoverSkillsForContext } from "./context.js";
 import { createConfigOnlyContextSnapshot } from "./context.js";
 import { initializeMessageHistoryFromContext } from "./context.js";
@@ -335,6 +336,7 @@ export function installAgentRuntimeMethods(ctor: AgentRuntimeConstructor): void 
   proto.reactiveCompactAfterContextExceeded = reactiveCompactAfterContextExceeded;
   proto.compactActiveConversation = compactActiveConversation;
   proto.executeRewindCommand = executeRewindCommand;
+  proto.executeReloadMcpCommand = executeReloadMcpCommand;
   proto.formatRewindStatus = formatRewindStatus;
   proto.rewindWorkspaceToCheckpoint = rewindWorkspaceToCheckpoint;
   proto.rewindToMessage = rewindToMessage;

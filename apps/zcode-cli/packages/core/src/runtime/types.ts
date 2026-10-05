@@ -336,6 +336,12 @@ export interface AgentRuntimeDeps {
   pdfDocumentPort?: PdfDocumentPort;
   skillPort?: SkillPort;
   mcpPort?: McpPort;
+  /**
+   * /reload 命令的 MCP 配置重读通道。runtime config 是会话创建时的快照，
+   * 磁盘上的 MCP 配置可以在会话存活期间被宿主（Web/Desktop 设置页）改写；
+   * refresher 由 bootstrap 注入，负责重读磁盘并与 plugin/builtin server 合并。
+   */
+  mcpConfigRefresher?: () => Promise<AgentRuntimeConfig["mcp"] | undefined>;
   subagentPort?: SubagentPort;
   coordinatorResponsePort?: CoordinatorResponsePort;
   /** 工作流 actor 提交终态结果的端口；存在即作为 submit_result 工具的注册门。 */
@@ -741,7 +747,7 @@ export interface ExecuteToolsResult {
   events: SessionEvent[];
 }
 
-export type ActiveTurnKind = "regular" | "compact" | "rewind";
+export type ActiveTurnKind = "regular" | "compact" | "rewind" | "reload";
 
 export const INLINE_TEXT_ATTACHMENT_MAX_BYTES = 64 * 1024;
 

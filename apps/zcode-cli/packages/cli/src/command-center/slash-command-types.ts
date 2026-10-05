@@ -91,6 +91,12 @@ export type SlashCommand =
     }
   | {
       args: string;
+      name: "reload";
+      rawName: string;
+      type: "known";
+    }
+  | {
+      args: string;
       name: "rewind";
       rawName: string;
       type: "known";

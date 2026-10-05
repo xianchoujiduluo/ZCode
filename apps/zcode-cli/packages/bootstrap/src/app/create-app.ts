@@ -93,6 +93,7 @@ import {
   type NodeReplBrowserBroker,
 } from "./node-repl-browser-broker.js";
 import { resolveBuiltInNodeReplMcpServers } from "./built-in-node-repl.js";
+import { omitMcpServers, resolveTrustedOfficialCuaServerNames } from "../mcp-config.js";
 import { resolveZCodeCustomCommandPrompt } from "../custom-command-prompt.js";
 import { resolveZCodeBuiltinPromptCommand } from "../builtin-prompt-command.js";
 import { collectDisabledPaths } from "../skill-command-overrides.js";
@@ -725,6 +726,33 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     });
     runtime = new AgentRuntime(sessionId, runtimeConfig, {
       agentTelemetry: modelTelemetry.agentExecution,
+      // /reload 热重载通道：重读磁盘 MCP 配置，并按 resolveAppRuntimeConfig 的
+      // 同一合并顺序叠加启动期解析的 plugin/builtin server（插件身份不热加载，
+      // 这里保持启动时快照），避免 replace 语义把 node_repl 等内建 server 误断开。
+      mcpConfigRefresher: async () => {
+        const refreshed = createConfig({ env: options.env, workingDirectory });
+        const mergedServers = {
+          ...pluginOutcome.mcpServers,
+          ...refreshed.config.mcp.servers,
+          ...builtInMcpServers,
+        };
+        const servers = nodeReplBrowserBroker
+          ? injectNodeReplBrowserBroker(mergedServers, nodeReplBrowserBroker)
+          : mergedServers;
+        const trustedOfficialCuaServerNames = resolveTrustedOfficialCuaServerNames(
+          servers,
+          pluginOutcome.mcpServers,
+        );
+        const cuaBridgeServerNames = new Set(trustedOfficialCuaServerNames);
+        if (pluginRuntimeFeatures?.computerUse === true && servers.node_repl) {
+          cuaBridgeServerNames.add("node_repl");
+        }
+        return {
+          enabled: refreshed.config.features.mcp,
+          servers: omitMcpServers(servers, new Set<string>(), cuaBridgeServerNames),
+          trustedOfficialCuaServerNames: [...trustedOfficialCuaServerNames],
+        };
+      },
       // 主代理的模型请求过治理器的 observer：立即放行，但让治理器看见它的 429 / 成功。
       modelRequestAdmission: workflowConcurrencyGovernor.observer(),
       eventStore: options.eventStore ?? createInMemorySessionEventStore(),

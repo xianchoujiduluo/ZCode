@@ -14,6 +14,18 @@ export function parseCompactCommand(input: string): string | undefined | null {
   return null;
 }
 
+/**
+ * /reload 是 runtime 维护命令：重读磁盘 MCP 配置并对当前会话执行热重载。
+ * 命中返回 true；未命中返回 null（交给后续命令解析或模型）。
+ */
+export function parseReloadMcpCommand(input: string): true | null {
+  const trimmed = input.trim();
+  if (trimmed === "/reload" || trimmed === "/reload mcp") {
+    return true;
+  }
+  return null;
+}
+
 export function parseRewindCommand(input: string): ParsedRewindCommand | null {
   const trimmed = input.trim();
   if (trimmed === "/fork") {

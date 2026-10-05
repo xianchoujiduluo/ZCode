@@ -1,6 +1,6 @@
 import { resolveSelectionSideInheritedModel } from "@/lib/selectionSideInheritedModel.js";
 import { useStartPlanRecommendation } from "@/hooks/useStartPlanRecommendation.js";
-import type { SessionCreateSource } from "@zcode/shared";
+import type { SessionCreateSource, ZCodeAgentMcpServer } from "@zcode/shared";
 import { reportSessionCreate } from "@/lib/sessionCreateTelemetry.js";
 import { getLocalTtftObserver } from "@/v4/telemetry/localTtftObserver.js";
 /* oxlint-disable eslint(max-lines) -- SessionPane 是单 pane 竖切的命令编排收口（订阅/发送/停止/fork/edit/retry/queue/slash 全集），与旧 ChatView 同粒度；HEAD 已超限（693 行计数），拆散命令组会打散 dispatchCommand/snapshotRef 的闭包纪律。 */
@@ -282,6 +282,28 @@ import {
   type ConversationSelectionReference,
 } from "@/lib/conversationSelectionReference.js";
 import { canWriteClipboard, writeClipboardText } from "@/lib/clipboard.js";
+import { useMcpStore } from "@/store/mcpStore.js";
+
+/**
+ * 创建会话时随命令携带的 MCP 服务器列表。
+ *
+ * MCP 是 **runtime 启动期配置**（协议侧注释：`command.ts` 的 createSession payload
+ * 明确要求「必须随 create 一次性进入 record，不能在首发后补写」），所以只能在
+ * createSession 这一个时刻传。不传的后果是 runtime 里 serverCount=0，工具永不注册
+ * ——Web 端此前一直如此，因为这条链路只有 CLI 的 bootstrap 传过。
+ *
+ * 返回可直接展开进 payload 的对象：没有可用服务器时返回空对象，
+ * 避免给协议发送一个空数组（部分旧 CLI 会对未知键静默丢弃，空数组是多余的往返）。
+ */
+function withMcpServersForCreate(): { mcpServers?: ZCodeAgentMcpServer[] } {
+  try {
+    const servers = useMcpStore.getState().getEnabledMcpServersForZCode("zcode");
+    return servers.length > 0 ? { mcpServers: servers } : {};
+  } catch {
+    // store 未初始化（如极早期渲染）时不阻断建会话，行为退回修复前。
+    return {};
+  }
+}
 
 export interface SessionPaneProps {
   paneId: string;
@@ -2711,7 +2733,13 @@ export function SessionPane({
         );
         const createAck = await dispatchSubmissionCommand(
           "createSession",
-          { workspaceId: workspaceKey, ...draftConfigPayload },
+          {
+            workspaceId: workspaceKey,
+            ...draftConfigPayload,
+            // MCP 只在 create 这一刻进 record（协议要求，首发后无法补写）；
+            // 预热与 fallback 两条路径都要带，否则该会话永远没有 MCP 工具。
+            ...withMcpServersForCreate(),
+          },
           null,
         );
         if (createAck.status !== "accepted") {
@@ -2797,6 +2825,7 @@ export function SessionPane({
               workspaceId: workspaceKey,
               firstInput: { text: effectiveText, ...submission },
               ...draftConfigPayload,
+              ...withMcpServersForCreate(),
             },
             null,
             undefined,
@@ -2825,7 +2854,13 @@ export function SessionPane({
         // 不做任何附件上传，也不会让非 ready 附件绕过 composer 门禁。
         const createAck = await dispatchSubmissionCommand(
           "createSession",
-          { workspaceId: workspaceKey, ...draftConfigPayload },
+          {
+            workspaceId: workspaceKey,
+            ...draftConfigPayload,
+            // MCP 只在 create 这一刻进 record（协议要求，首发后无法补写）；
+            // 预热与 fallback 两条路径都要带，否则该会话永远没有 MCP 工具。
+            ...withMcpServersForCreate(),
+          },
           null,
         );
         if (createAck.status !== "accepted") {

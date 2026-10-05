@@ -123,6 +123,15 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     };
   }
 
+  if (rawName === "reload") {
+    return {
+      args,
+      name: "reload",
+      rawName,
+      type: "known",
+    };
+  }
+
   if (rawName === "new" || rawName === "clear") {
     return {
       args,

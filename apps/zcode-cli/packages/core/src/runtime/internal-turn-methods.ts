@@ -113,6 +113,13 @@ export interface AgentRuntimeTurnMethods {
     abortSignal?: AbortSignal,
     inputId?: string,
   ): Promise<TurnResult>;
+  executeReloadMcpCommand(
+    input: string,
+    turnId: TurnId,
+    turnTraceContext: TraceContext,
+    abortSignal?: AbortSignal,
+    inputId?: string,
+  ): Promise<TurnResult>;
   formatRewindStatus(): Promise<string>;
   rewindWorkspaceToCheckpoint(options: {
     abortSignal?: AbortSignal;

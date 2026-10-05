@@ -168,10 +168,13 @@ export class AgentRuntime {
   private contextSourcePort?: ContextSourcePort;
   private skillPort?: SkillPort;
   private mcpPort?: McpPort;
+  private mcpConfigRefresher?: AgentRuntimeDeps["mcpConfigRefresher"];
   private mcpStartupPromise?: Promise<McpConnectionSnapshot>;
   private residencyBlockingWorkCount = 0;
   private mcpInitialized = false;
   private mcpToolsRegistered = false;
+  /** 本会话当前已注册的 MCP 工具名；/reload 热重载时 diff 注销被移除的 server 工具。 */
+  private registeredMcpToolNames: Set<string> = new Set();
   private subagentPort?: SubagentPort;
   private dynamicWorkflowRunPort?: DynamicWorkflowRunPort;
   private modelCatalogPort?: ModelCatalogPort;
@@ -281,6 +284,7 @@ export class AgentRuntime {
     this.contextSourcePort = deps.contextSourcePort;
     this.skillPort = deps.skillPort;
     this.mcpPort = deps.mcpPort;
+    this.mcpConfigRefresher = deps.mcpConfigRefresher;
     this.runtimeTaskRegistry = deps.runtimeTaskRegistry ?? new InMemoryRuntimeTaskRegistry();
     this.runtimeTaskRegistry.setActiveBranchGeneration?.(this.branchGeneration);
     this.artifactStore = deps.artifactStore;
