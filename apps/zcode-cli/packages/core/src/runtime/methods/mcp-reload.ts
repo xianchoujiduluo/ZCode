@@ -20,7 +20,12 @@ import {
 } from "../helpers/index.js";
 import type { TurnResult } from "../types.js";
 import type { AgentRuntimeInternal } from "../internal.js";
-import { computeOfficialCuaServerNames, MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS } from "./mcp.js";
+import {
+  buildPluginIdByServerName,
+  computeOfficialCuaServerNames,
+  MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS,
+  mcpToolsSignature,
+} from "./mcp.js";
 import { recordTurnUsageFact } from "./usage-observability.js";
 
 /**
@@ -197,6 +202,7 @@ async function reloadMcpServers(
   }
 
   // 3. diff 注销被移除 server 的旧工具，再按新快照重新注册（同名覆盖）。
+  // 与 initializeMcp/refreshMcpToolsIfChanged 相同的注册面：插件 UI 归属也随 reload 重建。
   const registered = registerMcpTools(runtime.registry, mcpPort, snapshot.tools, {
     allowedTools: runtime.config.toolAllowlist,
     disallowedTools: runtime.config.toolDisallowlist,
@@ -204,8 +210,11 @@ async function reloadMcpServers(
       servers,
       new Set(nextMcp?.trustedOfficialCuaServerNames ?? []),
     ),
+    pluginIdByServerName: buildPluginIdByServerName(runtime.config.pluginReferenceCatalog),
   });
-  const previousNames = runtime.registeredMcpToolNames;
+  // 上游以 string[] + 签名 + revision 记录注册事实；reload 后同步三者，
+  // 避免回合边界 refreshMcpToolsIfChanged 用旧签名误判再刷一次。
+  const previousNames = new Set(runtime.registeredMcpToolNames ?? []);
   const nextNames = new Set(registered);
   let removedCount = 0;
   for (const name of previousNames) {
@@ -214,7 +223,9 @@ async function reloadMcpServers(
       removedCount++;
     }
   }
-  runtime.registeredMcpToolNames = nextNames;
+  runtime.registeredMcpToolNames = registered;
+  runtime.mcpToolsSignature = mcpToolsSignature(snapshot.tools);
+  runtime.mcpToolListRevision = mcpPort.toolListRevision?.();
   if (previousNames.size > 0 || nextNames.size > 0) {
     runtime.invalidateToolCache();
   }

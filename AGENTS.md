@@ -7,66 +7,43 @@
 
 ## 命令与仓库结构
 
-开工前运行 `node scripts/check-workspace-freshness.mjs` 检查基线。该脚本默认执行 `git fetch`，离线时加 `--no-fetch`；落后远端会直接以非零码退出。Node 版本以 `mise.toml` 为准（Node 24.14.0 / pnpm 10.33.2）。
+开工前运行 `node scripts/check-workspace-freshness.mjs` 检查基线。Node 版本以 `mise.toml` 为准。
 
 以下命令从仓库根目录执行：
 
-| 用途             | 命令                                    |
-| ---------------- | --------------------------------------- |
-| 初始化           | `pnpm bootstrap`                        |
-| 类型检查         | `pnpm typecheck`                        |
-| Lint             | `pnpm lint` / `pnpm lint:fix`           |
-| 格式化           | `pnpm fmt` / `pnpm fmt:check`           |
-| 桌面开发         | `pnpm dev:desktop`                      |
-| Web 开发         | `pnpm dev:web`                          |
-| 桌面打包         | `pnpm bundle:desktop`                   |
-| 提交前检查       | `pnpm verify:pre-push`                  |
-| 架构检查         | `pnpm architecture:check --changed`     |
-| 架构报告 / 基线  | `pnpm architecture:report`              |
-| 模块阅读包       | `pnpm architecture:context <module-id>` |
-| 依赖图           | `pnpm dep:graph`                        |
-| 未使用依赖与导出 | `pnpm knip`                             |
-| 导出引用查询     | `pnpm dep:refs --list-exports <file>`   |
+| 用途             | 命令                                                 |
+| ---------------- | ---------------------------------------------------- |
+| 类型检查         | `pnpm typecheck`                                     |
+| Lint             | `pnpm lint` / `pnpm lint:fix`                        |
+| 格式检查         | `pnpm fmt:check`                                     |
+| 桌面开发         | `pnpm dev:desktop`                                   |
+| Web 开发         | `pnpm dev:web`                                       |
+| 提交前检查       | `pnpm verify:pre-push`（Lint、架构检查与受影响单测） |
+| 架构检查         | `pnpm architecture:check --changed`                  |
+| 模块阅读包       | `pnpm architecture:context <module-id>`              |
+| 未使用依赖与导出 | `pnpm knip`                                          |
+| 导出引用查询     | `pnpm dep:refs --list-exports <file>`                |
 
-- `pnpm dev:desktop` 等价 `dev:desktop:prod`（生产服务配置）；连测试环境用 `pnpm dev:desktop:test`。
-- `pnpm verify:pre-push` = `pnpm lint` + `pnpm architecture:check --changed`。
-- `pnpm bundle:desktop` 需带平台参数，如 `pnpm bundle:desktop -- --os linux --arch x64`。
+affected 使用 Vitest 官方选择，只运行选中的根 UT；选中整个套件时说明并跳过 UT，成功退出，不因此阻止 Push；不替代 CLI 测试或桌面 E2E。全量使用 `pnpm test` / `pnpm test:unit`，仅在用户明确要求时调用。范围与输出合同见 [pre-push 说明](docs/testing/pre-push-hook.md)。
 
-### 工具链覆盖范围（易踩坑）
-
-- 根 `pnpm typecheck` 用 `tsc -b` 且**显式列举**了 project references：`packages/model-option-map`、`packages/formal-proof`、`packages/zcode-cua` 与 `apps/zcode-cli` 都不在其中；改这些目录后根检查通过不代表已通过类型检查。
-- 根 `pnpm lint`（oxlint）的 `ignorePatterns` 排除了 `apps/zcode-cli`、`packages/formal-proof`、`packages/ui/src/components/ui`、`packages/ui/src/components/ai-elements`、`.agents/skills`。
-- `apps/zcode-cli` 是嵌套 workspace，自带 turbo 工具链：`pnpm --dir apps/zcode-cli typecheck`、`lint`、`format`、`check`（含 `registry:check`）。根目录 `pnpm install` 已覆盖它（约 33 个项目），不要在内层重复安装。
-- 仓库当前**没有配置任何测试运行器**：全仓仅 `packages/services/test/`、`packages/ui/test/` 下 4 个测试文件，各包 `package.json` 无 `test` 脚本，也没有 vitest / playwright 配置。新增测试前先确认运行方式，不要假定存在统一的单测或 E2E 命令。
-- 未安装 Git hooks（无 `.husky/`，`core.hooksPath` 未设置），`pnpm verify:pre-push` 需手动执行。
-- `pnpm bundle:desktop` 内部串联 `prepare:runtime-assets → build → electron-builder → 产物校验`，不要绕过它直接调 electron-builder。
-
-### 目录职责
+测试入口以目标包当前的 `package.json` 和实际测试文件为准，不假定存在统一的单测或 E2E 命令。
 
 - `packages/desktop`：Electron main、host、renderer。
 - `packages/web`、`packages/server`：Web 客户端与服务端。
-- `packages/zcode-server-cli`：独立 Server 启动与进程管理。
 - `packages/ui`：共享 React 组件、hooks 与 Zustand store。
 - `packages/services`：业务服务；`packages/rpc`：RPC 框架。
 - `packages/shared`：共享协议与类型；`packages/client`：Agent 客户端 SDK。
-- `packages/provider`、`packages/provider-node`：Provider 公共能力与 Node 侧实现。
-- `packages/model-option-map`：模型选项映射的 tokenizer、compiler 与 evaluator。
-- `packages/zcode-cua`：Computer Use 占位包，当前发行版不含该能力，运行时入口统一报告 unavailable 并 fail closed。
-- `packages/formal-proof`：产品行为状态空间枚举器，本地 Vite 页面。
-- `apps/zcode-cli`：Agent CLI 与运行时；`apps/zcode-cli/packages/*` 为其内部包（`cli` 入口、`core`、`tui`、`adapters`、`contracts` 等），CLI 专项规则见 `apps/zcode-cli/AGENTS.md`。
+- `apps/zcode-cli`：Agent CLI 与运行时。
 - `CONTEXT.md`：插件商店领域词汇；修改相关 UI 前阅读。
 - `DESIGN.md`：UI 设计规范；修改 UI 前阅读。
-- `DEPLOY.md`：Web + Agent 发行包的 Linux 部署与运维（安装、systemd、反向代理、验证清单）。
-- `config/README.md`：内置默认配置（`config/default.json` 随客户端发布，必须保留）与帮助入口的来源规则。
-- `README.md`：开发与打包命令的完整说明；`harness/remote/` 为远程（SSH/WSL/Docker）构建脚手架。
 
 ## 实现与验证
 
 - 代码改动使用 `.agents/skills/architecture-governance/SKILL.md`，先运行架构检查，再读取目标模块的受控上下文。
-- 边界规则来自 `architecture-policy.yaml`：单文件 ≤ 400 行（`max-lines` 也是 oxlint error 级规则）、contract 文件 ≤ 300 行、单模块公开方法 ≤ 12、禁止循环依赖与深层导入。注意 `global.managedOnly: true`：当前只有 `storage` 模块（`packages/services/src/storage`，含 `contract.ts` 公开入口）标记 `managed: true`，其边界规则会被强制检查；其余模块是 legacy 基线（`.architecture-baseline.json` 为空），不报错但不应照抄其中的越界模式。
 - 避免重复状态和多条写入路径。明确唯一所有者、接口、依赖方向、事件顺序与幂等边界，不能用超时掩盖同步问题。
-- 有行为改动时先补充对应测试；交互改动需要 E2E 场景。检查测试与实现是否一致，并实际执行可用的验证。未执行或环境受限时如实说明（当前仓库没有统一测试运行器，见上文「工具链覆盖范围」）。
+- 有行为改动时先补充对应测试；交互改动需要 E2E 场景。检查测试与实现是否一致，并实际执行可用的验证。未执行或环境受限时如实说明。
 - 修复 bug 时用中文注释说明原因和修复依据。发现设计缺陷时先与用户对齐，不不断增加兜底分支。
+- PR 描述须说明背景、设计意图与修改前后行为；包含 bugfix 时逐项说明触发场景、根因证据、修复机制及回归验证，并尽量关联已有工单链接。未确认的根因或引入提交如实标注，不根据模块或时间接近推断归因。
 - 涉及状态、时序、远端或异步同步的方案，用图展示所有者及事件顺序。
 - 必须执行 `pnpm typecheck` 和 `pnpm lint`，报告真实结果，不将已有失败写成通过。
 - 使用异步文件和网络 IO；跨包导入使用公开入口，遵守现有路径别名。

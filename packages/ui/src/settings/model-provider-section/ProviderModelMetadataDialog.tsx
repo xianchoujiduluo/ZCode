@@ -40,7 +40,7 @@ import {
 import { ModelEditorAdvanced } from "@/settings/model-provider-section/ModelEditorAdvanced.js";
 import { FetchModelsButton } from "@/settings/model-provider-section/FetchModelsButton.js";
 
-function selectFocusedInputText(event: Pick<FocusEvent<HTMLInputElement>, "currentTarget">) {
+export function selectFocusedInputText(event: Pick<FocusEvent<HTMLInputElement>, "currentTarget">) {
   event.currentTarget.select();
 }
 

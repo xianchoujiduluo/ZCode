@@ -11,7 +11,7 @@
 //
 // 结构：生命周期收敛在纯控制器 startDraftSessionPrewarm（可单测，无 React 依赖），
 // useDraftSessionPrewarm 只做 effect 接线与 owner-scoped binding 暴露。
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { CommandAck, CommandType, SessionConfigState } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
 
@@ -21,7 +21,7 @@ type DispatchCommand = (
   targetSessionId: string | null,
 ) => Promise<CommandAck>;
 
-interface DraftPrewarmController {
+export interface DraftPrewarmController {
   /** 首条 admission 命令已发出、ACK 未收口；dispose 不得删除结果未知的会话。 */
   markPromotionPending(): void;
   /** 首发成功后标记（dispose 不再删除已提升的会话）。 */
@@ -36,7 +36,7 @@ interface DraftPrewarmController {
 }
 
 /** 预热生命周期纯控制器：创建 → onReady 上抛 → dispose 决策清理。 */
-function startDraftSessionPrewarm(params: {
+export function startDraftSessionPrewarm(params: {
   workspaceKey: string;
   dispatchCommand: DispatchCommand;
   onReady: (sessionId: string) => void;
@@ -44,8 +44,19 @@ function startDraftSessionPrewarm(params: {
   onSettled?: () => void;
   /** 预热会话初始 config（全局「上次选择」，同步解析）；让投影首帧即全局、不闪。 */
   resolveInitialConfig?: () => Partial<SessionConfigState> | undefined;
+  /** v4 createSession 附带的 MCP servers（runtime 启动期配置，创建后无法补写）。 */
+  resolveMcpServersForCreate?: () =>
+    | readonly import("@zcode/shared").ZCodeAgentMcpServer[]
+    | undefined;
 }): DraftPrewarmController {
-  const { workspaceKey, dispatchCommand, onReady, onSettled, resolveInitialConfig } = params;
+  const {
+    workspaceKey,
+    dispatchCommand,
+    onReady,
+    onSettled,
+    resolveInitialConfig,
+    resolveMcpServersForCreate,
+  } = params;
   let disposed = false;
   let promotionState: "draft" | "pending" | "promoted" | "discarded" = "draft";
   let createdSessionId: string | null = null;
@@ -73,6 +84,12 @@ function startDraftSessionPrewarm(params: {
       // 预热会话首帧即用全局模型（CLI 归并 createSession.config），不闪 workspace 缺省。
       createPayload.config = initialConfig;
     }
+    const mcpServers = resolveMcpServersForCreate?.();
+    if (mcpServers && mcpServers.length > 0) {
+      // MCP 只在 create 这一刻进 record（协议要求，首发后无法补写）；
+      // 预热会话是新任务的唯一创建路径，不带则该会话永远没有 MCP 工具。
+      createPayload.mcpServers = mcpServers;
+    }
     return createPayload;
   };
   const dispatchCreateSession = () => {
@@ -89,7 +106,7 @@ function startDraftSessionPrewarm(params: {
         return;
       }
       if (ack.status !== "accepted" || ack.result?.type !== "createSession") {
-        logger.warn("[v4-draft-prewarm] createSession 被拒，回落无预热路径", {
+        logger.warn("[v4-draft-prewarm] createSession 被拒", {
           status: ack.status,
           reasonCode: ack.reasonCode ?? null,
           workspaceKey,
@@ -109,7 +126,7 @@ function startDraftSessionPrewarm(params: {
       onReady(createdSessionId);
     })
     .catch((error) => {
-      logger.warn("[v4-draft-prewarm] createSession 失败，回落无预热路径", {
+      logger.warn("[v4-draft-prewarm] createSession 失败", {
         error: error instanceof Error ? error.message : String(error),
         workspaceKey,
       });
@@ -145,12 +162,14 @@ function startDraftSessionPrewarm(params: {
   };
 }
 
-interface DraftSessionPrewarm {
+export interface DraftSessionPrewarm {
   /** 当前 workspace/transport generation 已就绪的预热 binding。 */
   binding: DraftPrewarmBinding | null;
+  /** 首发等待本 owner 当前创建任务；失败或换代即拒绝，不在发送路径另建会话。 */
+  waitForSession(): Promise<DraftPrewarmBinding>;
 }
 
-interface DraftPrewarmBinding {
+export interface DraftPrewarmBinding {
   workspaceKey: string;
   sessionId: string;
   /** 首条 admission 命令发出前同步占住生命周期；false 表示 binding 已不是当前 owner。 */
@@ -162,6 +181,7 @@ interface DraftPrewarmBinding {
 }
 
 interface DraftPrewarmSubscriber {
+  generation: object;
   invalidationVersion: number;
   onBinding: (binding: DraftPrewarmBinding | null) => void;
 }
@@ -171,6 +191,7 @@ interface DraftPrewarmCurrent {
   controller: DraftPrewarmController;
   binding: DraftPrewarmBinding | null;
   settled: boolean;
+  completion: Promise<void>;
   retiring: boolean;
   /** 本代是第几次退避重试的产物；0 表示首发。 */
   retryAttempt: number;
@@ -201,26 +222,85 @@ class DraftSessionPrewarmCoordinator {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private dispatchCommand: DispatchCommand;
   private resolveInitialConfig: (() => Partial<SessionConfigState> | undefined) | undefined;
+  private resolveMcpServersForCreate:
+    | (() => readonly import("@zcode/shared").ZCodeAgentMcpServer[] | undefined)
+    | undefined;
 
   constructor(
     private readonly workspaceKey: string,
     dispatchCommand: DispatchCommand,
     resolveInitialConfig: (() => Partial<SessionConfigState> | undefined) | undefined,
+    resolveMcpServersForCreate:
+      | (() => readonly import("@zcode/shared").ZCodeAgentMcpServer[] | undefined)
+      | undefined,
     private readonly onEmpty: () => void,
   ) {
     this.dispatchCommand = dispatchCommand;
     this.resolveInitialConfig = resolveInitialConfig;
+    this.resolveMcpServersForCreate = resolveMcpServersForCreate;
   }
 
   update(
     dispatchCommand: DispatchCommand,
     resolveInitialConfig: (() => Partial<SessionConfigState> | undefined) | undefined,
+    resolveMcpServersForCreate?:
+      | (() => readonly import("@zcode/shared").ZCodeAgentMcpServer[] | undefined)
+      | undefined,
   ): void {
     this.dispatchCommand = dispatchCommand;
     this.resolveInitialConfig = resolveInitialConfig;
+    if (resolveMcpServersForCreate !== undefined) {
+      this.resolveMcpServersForCreate = resolveMcpServersForCreate;
+    }
+  }
+
+  async waitForSession(
+    invalidationVersion: number,
+    generation: object,
+  ): Promise<DraftPrewarmBinding> {
+    const assertCurrentSubscriber = () => {
+      if (
+        this.requestedInvalidationVersion() !== invalidationVersion ||
+        !Array.from(this.subscribers.values()).some(
+          (subscriber) => subscriber.generation === generation,
+        )
+      )
+        throw new Error("草稿会话已切换，请重新发送");
+    };
+    assertCurrentSubscriber();
+    // 新草稿已接管时，旧创建仍可能在回收；这是等待窗口，不是用户再次切换。
+    // 资格绑定本次订阅，防止相同版本的离开/重进让旧提交借新草稿继续发送。
+    if (this.current?.retiring) {
+      await this.current.completion;
+      assertCurrentSubscriber();
+    }
+    // 已确定失败/失效后，用户再次点击可以重试；仍由 owner 创建并合并并发等待者，
+    // 不能因后台重试耗尽就让当前草稿永久无法发送。
+    if (this.current?.settled && !this.current.binding) {
+      this.clearRetryTimer();
+      this.blockedInvalidationVersion = null;
+      this.current = null;
+      this.startCurrent(invalidationVersion);
+    }
+    const current = this.current;
+    if (!current) throw new Error("草稿会话尚未开始创建");
+    // Bug 根因：binding=null 同时表示创建在途和失败，首发据此另建会话会与预热并发。
+    // 创建只归此 owner；等待捕获的一代，不能在 await 后悄悄换成另一个会话发送。
+    await current.completion;
+    assertCurrentSubscriber();
+    if (
+      this.current !== current ||
+      current.retiring ||
+      current.invalidationVersion !== invalidationVersion ||
+      this.requestedInvalidationVersion() !== invalidationVersion
+    )
+      throw new Error("草稿会话已切换，请重新发送");
+    if (!current.binding) throw new Error("草稿会话创建失败，请重试");
+    return current.binding;
   }
 
   acquire(params: {
+    generation: object;
     invalidationVersion: number;
     onBinding: (binding: DraftPrewarmBinding | null) => void;
   }): () => void {
@@ -298,7 +378,7 @@ class DraftSessionPrewarmCoordinator {
 
   /**
    * createSession 收口却没拿到 binding = 失败（被拒或异常）。回收导致的 client disposed 是
-   * 瞬态的，按退避重排一次创建；用尽则维持既有的「回落无预热路径」行为。
+   * 瞬态的，按退避重排一次创建；用尽后保留失败态，由下一次生命周期失效重新创建。
    */
   private scheduleRetryAfterFailure(failed: DraftPrewarmCurrent): void {
     const delay = PREWARM_RETRY_DELAYS_MS[failed.retryAttempt];
@@ -318,11 +398,16 @@ class DraftSessionPrewarmCoordinator {
 
   private startCurrent(invalidationVersion: number, retryAttempt = 0): void {
     let current!: DraftPrewarmCurrent;
+    let complete!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
     const controller = startDraftSessionPrewarm({
       workspaceKey: this.workspaceKey,
       dispatchCommand: (type, payload, targetSessionId) =>
         this.dispatchCommand(type, payload, targetSessionId),
       resolveInitialConfig: () => this.resolveInitialConfig?.(),
+      resolveMcpServersForCreate: () => this.resolveMcpServersForCreate?.(),
       onReady: (sessionId) => {
         if (this.current !== current || current.retiring) {
           return;
@@ -359,6 +444,7 @@ class DraftSessionPrewarmCoordinator {
       },
       onSettled: () => {
         current.settled = true;
+        complete();
         if (this.current !== current || !current.retiring) {
           // 未被 retire 却没拿到 binding = createSession 失败；瞬态回收可退避重试。
           if (this.current === current && !current.retiring && current.binding === null) {
@@ -379,6 +465,7 @@ class DraftSessionPrewarmCoordinator {
       controller,
       binding: null,
       settled: false,
+      completion,
       retiring: false,
       retryAttempt,
     };
@@ -431,6 +518,9 @@ function getDraftSessionPrewarmCoordinator(params: {
   transportIdentity: unknown;
   dispatchCommand: DispatchCommand;
   resolveInitialConfig: (() => Partial<SessionConfigState> | undefined) | undefined;
+  resolveMcpServersForCreate?:
+    | (() => readonly import("@zcode/shared").ZCodeAgentMcpServer[] | undefined)
+    | undefined;
 }): DraftSessionPrewarmCoordinator {
   let transportCoordinators = draftPrewarmCoordinatorsByTransport.get(params.transportIdentity);
   if (!transportCoordinators) {
@@ -444,6 +534,7 @@ function getDraftSessionPrewarmCoordinator(params: {
       params.workspaceKey,
       params.dispatchCommand,
       params.resolveInitialConfig,
+      params.resolveMcpServersForCreate,
       () => {
         if (transportCoordinators?.get(ownerKey) !== coordinator) {
           return;
@@ -472,6 +563,10 @@ export function useDraftSessionPrewarm(params: {
   dispatchCommand: DispatchCommand;
   /** 预热会话初始 config（全局「上次选择」，同步解析）；让投影首帧即全局、不闪。 */
   resolveInitialConfig?: () => Partial<SessionConfigState> | undefined;
+  /** v4 createSession 附带的 MCP servers（runtime 启动期配置，创建后无法补写）。 */
+  resolveMcpServersForCreate?: () =>
+    | readonly import("@zcode/shared").ZCodeAgentMcpServer[]
+    | undefined;
 }): DraftSessionPrewarm {
   const {
     enabled,
@@ -481,6 +576,7 @@ export function useDraftSessionPrewarm(params: {
     invalidationVersion = 0,
     dispatchCommand,
     resolveInitialConfig,
+    resolveMcpServersForCreate,
   } = params;
   // workspace/pane/transport 共同定义逻辑 owner：同 owner 重挂复用 single-flight，transport
   // 换代仍生成新 coordinator，确保旧 session 的清理不会误走新 transport。
@@ -496,12 +592,13 @@ export function useDraftSessionPrewarm(params: {
         transportIdentity,
         dispatchCommand,
         resolveInitialConfig,
+        resolveMcpServersForCreate,
       }),
     [owner],
   );
   useLayoutEffect(() => {
-    coordinator.update(dispatchCommand, resolveInitialConfig);
-  }, [coordinator, dispatchCommand, resolveInitialConfig]);
+    coordinator.update(dispatchCommand, resolveInitialConfig, resolveMcpServersForCreate);
+  }, [coordinator, dispatchCommand, resolveInitialConfig, resolveMcpServersForCreate]);
   const generation = useMemo(() => ({ owner }), [enabled, invalidationVersion, owner]);
   const [ready, setReady] = useState<{
     generation: typeof generation;
@@ -511,6 +608,7 @@ export function useDraftSessionPrewarm(params: {
   useEffect(() => {
     if (!enabled) return;
     return coordinator.acquire({
+      generation,
       invalidationVersion,
       onBinding: (binding) => {
         setReady((current) => {
@@ -523,5 +621,10 @@ export function useDraftSessionPrewarm(params: {
     });
   }, [coordinator, enabled, generation, invalidationVersion]);
 
-  return { binding: ready?.generation === generation ? ready.binding : null };
+  const waitForSession = useCallback(async () => {
+    if (!enabled) throw new Error("草稿会话尚未启用");
+    return coordinator.waitForSession(invalidationVersion, generation);
+  }, [coordinator, enabled, generation, invalidationVersion]);
+
+  return { binding: ready?.generation === generation ? ready.binding : null, waitForSession };
 }
