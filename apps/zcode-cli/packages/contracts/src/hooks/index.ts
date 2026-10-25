@@ -12,6 +12,12 @@ export const HookEventName = {
   PostToolUse: "PostToolUse",
   PostToolUseFailure: "PostToolUseFailure",
   Stop: "Stop",
+  /**
+   * 会话运行实例结束（app.close：连接关闭 / 删除会话 / resident 换出 / CLI 退出）。
+   * 注意：进程被强杀（服务重启）不经过优雅关闭链，不会触发本事件；
+   * resident 换出后会话仍可重新打开，接收方需按"会话暂歇"语义做幂等去重。
+   */
+  SessionEnd: "SessionEnd",
 } as const;
 
 export type HookEventName = (typeof HookEventName)[keyof typeof HookEventName];
@@ -138,6 +144,12 @@ export interface StopHookInput extends BaseHookInput {
   toolCallCount: number;
 }
 
+export interface SessionEndHookInput extends BaseHookInput {
+  /** 结束来源：close（连接关闭/删除）/ deactivate（resident 换出）/ exit（CLI 退出）。 */
+  hookEventName: typeof HookEventName.SessionEnd;
+  reason: "close" | "deactivate" | "exit";
+}
+
 export type HookInput =
   | PreToolUseHookInput
   | PermissionRequestHookInput
@@ -145,7 +157,8 @@ export type HookInput =
   | PostToolUseFailureHookInput
   | UserPromptSubmitHookInput
   | SessionStartHookInput
-  | StopHookInput;
+  | StopHookInput
+  | SessionEndHookInput;
 
 export type PermissionRequestHookDecision =
   | {
@@ -191,6 +204,10 @@ export type HookSpecificOutput =
   | {
       additionalContext?: string;
       hookEventName: typeof HookEventName.Stop;
+    }
+  | {
+      additionalContext?: string;
+      hookEventName: typeof HookEventName.SessionEnd;
     };
 
 export interface HookJSONOutput {
@@ -276,6 +293,10 @@ export const HookSpecificOutputSchema = z.discriminatedUnion("hookEventName", [
   z.object({
     additionalContext: z.string().optional(),
     hookEventName: z.literal(HookEventName.Stop),
+  }),
+  z.object({
+    additionalContext: z.string().optional(),
+    hookEventName: z.literal(HookEventName.SessionEnd),
   }),
 ]);
 

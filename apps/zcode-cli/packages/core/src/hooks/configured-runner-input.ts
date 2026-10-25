@@ -56,6 +56,7 @@ export async function createCompatibleHookStdin(input: HookInput): Promise<{
     case HookEventName.SessionStart:
     case HookEventName.UserPromptSubmit:
     case HookEventName.PreToolUse:
+    case HookEventName.SessionEnd:
       break;
   }
 

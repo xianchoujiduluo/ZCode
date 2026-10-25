@@ -8,7 +8,8 @@ export type HookEvent =
   | "PermissionRequest"
   | "PostToolUse"
   | "PostToolUseFailure"
-  | "Stop";
+  | "Stop"
+  | "SessionEnd";
 
 export type HookType = "command" | "process";
 

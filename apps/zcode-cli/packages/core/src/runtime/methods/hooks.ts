@@ -1,6 +1,6 @@
-import { HookEventName } from "../deps.js";
+import { HookEventName, traceContextToLogContext } from "../deps.js";
 import type { HookRunResult, Model, TraceContext, TurnState } from "../deps.js";
-import type { HookEventName as HookEventNameType } from "@zcode/contracts";
+import type { HookEventName as HookEventNameType, SessionEndHookInput } from "@zcode/contracts";
 import type { AgentRuntimeInternal } from "../internal.js";
 import {
   systemReminderAttachmentEntry,
@@ -157,4 +157,41 @@ function summarizeTurnAttachments(
 function truncateForHook(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}...`;
+}
+
+/**
+ * SessionEnd：会话运行实例结束（app.close 链触发；见 HookEventName.SessionEnd 注释）。
+ * 即发即忘语义：输出不进入模型上下文（会话已无后续轮次），阻断结果无意义，全部忽略；
+ * 调用方（session-facade）负责独立超时与不阻断资源释放。
+ */
+export async function runSessionEndHooks(
+  this: AgentRuntimeInternal,
+  reason: SessionEndHookInput["reason"],
+  traceContext: TraceContext,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!this.hookRunner) return;
+  try {
+    await this.hookRunner.run(
+      {
+        agentName: this.config.agentName,
+        cwd: this.workingDirectory,
+        hookEventName: HookEventName.SessionEnd,
+        mode: this.getMode(),
+        reason,
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        traceId: traceContext.traceId,
+      },
+      { signal },
+    );
+  } catch (error) {
+    this.logger?.warn("SessionEnd hook run failed", {
+      ...traceContextToLogContext(traceContext),
+      error: error instanceof Error ? error.message : String(error),
+      event: "hook.session_end.failed",
+      module: "core.runtime",
+      reason,
+    });
+  }
 }

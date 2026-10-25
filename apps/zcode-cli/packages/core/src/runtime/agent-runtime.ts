@@ -738,6 +738,15 @@ export interface AgentRuntime {
   isProjectMemoryEnabled(): boolean;
   /** 缺省等待最多 60 秒；null 等待全部已调度提取结束，不设置 drain deadline。 */
   drainMemoryExtractions(timeoutMs?: number | null): Promise<void>;
+  /**
+   * SessionEnd hooks（app.close 链触发）。即发即忘：不读输出、不阻断关闭；
+   * 调用方负责独立超时。见 HookEventName.SessionEnd 的语义注释。
+   */
+  runSessionEndHooks(
+    reason: "close" | "deactivate" | "exit",
+    traceContext: TraceContext,
+    signal?: AbortSignal,
+  ): Promise<void>;
 }
 
 installAgentRuntimeMethods(AgentRuntime);

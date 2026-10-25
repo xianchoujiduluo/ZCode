@@ -137,6 +137,7 @@ function applyHookSpecificOutput(result: HookRunResult, specific: HookSpecificOu
     case HookEventName.UserPromptSubmit:
     case HookEventName.SessionStart:
     case HookEventName.Stop:
+    case HookEventName.SessionEnd:
       if (specific.additionalContext) result.additionalContexts.push(specific.additionalContext);
       break;
   }

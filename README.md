@@ -143,6 +143,91 @@ node apps/zcode-cli/packages/cli/dist/zcode.cjs --help
 
 运行时变量可在启动命令的环境中显式设置。随客户端发布的默认配置见 [config/README.md](config/README.md)。
 
+## Hooks 配置规范
+
+ZCode 的 hooks 声明在 JSON 配置文件的 `hooks` 键下，有两个作用域：
+
+| 作用域 | 文件路径                          | 说明                         |
+| ------ | --------------------------------- | ---------------------------- |
+| 用户级 | `~/.zcode/cli/config.json`        | 对所有工作区生效             |
+| 工作区级 | `<工作区>/.zcode/config.json`   | 只对该工作区生效（需信任审核） |
+
+### 结构规范（严格校验）
+
+`hooks` 对象**只允许以下顶层键**，多余键会使整个 `hooks` 块校验失败、静默不加载：
+
+```
+hooks:
+  enabled         bool，可选 —— 总开关（缺省视为开）
+  timeoutMs       正数，可选 —— 全局默认超时（毫秒）
+  maxOutputBytes  正数，可选 —— 全局默认输出上限
+  events          对象，可选 —— 事件名 → matcher 数组
+```
+
+**事件名必须写在 `events` 之下**，不支持放在顶层。合法事件共 8 个：
+
+`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PermissionRequest` / `PostToolUse` / `PostToolUseFailure` / `Stop` / `SessionEnd`
+
+> `SessionEnd` 在会话运行实例结束时触发（连接关闭 / 删除会话 / resident 换出 / CLI 退出）；进程被强杀（服务重启）不触发。它是即发即忘语义，输出不进入模型上下文；resident 换出后可话可被重新打开，接收方需做幂等去重。
+
+### 完整示例
+
+```json
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "/home/user/.zcode/hooks/notify.sh",
+              "enabled": true,
+              "async": true,
+              "timeout": 60
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            { "type": "command", "command": "echo $ZCODE_HOOK_INPUT" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+### 字段说明
+
+matcher 对象只允许 `matcher`（可选，工具名通配）与 `hooks`（至少 1 条声明）两个键。每条 hook 声明二选一形态：
+
+| 字段 | `type: "command"` | `type: "process"` | 说明 |
+| ---- | ----------------- | ----------------- | ---- |
+| `command` | 必填 | 必填 | 命令或可执行文件 |
+| `enabled` | 可选 | 可选 | 缺省视为启用 |
+| `async`   | 可选 | —     | 异步执行，不阻塞会话 |
+| `shell`   | 可选（`true` 或 shell 路径） | — | 显式指定 shell |
+| `timeout` / `timeoutMs` | 可选（秒 / 毫秒） | 可选（`timeoutMs`） | 单条超时，默认 60s |
+| `args`    | — | 可选 | process 参数 |
+| `statusMessage` | 可选 | 可选 | 展示用说明 |
+
+### 外部工具写入注意事项
+
+`hooks` 块采用 **strict 模式校验**：出现任何未知键（例如把事件名写到 `hooks` 顶层）都会导致**整个 hooks 块不加载，且界面上不显示、不报错**；此时用户在设置页保存任何 hooks 变更，会按界面当前列表**整体覆写** `events`，可能把未加载的声明从文件中抹掉。
+
+因此第三方工具（通知器、状态跟踪器等）若需写入本配置，务必遵守：
+
+1. 事件名只能作为 `hooks.events` 的键，`hooks` 顶层仅允许 `enabled` / `events` / `timeoutMs` / `maxOutputBytes`；
+2. 修改时先读原文件、只改动自己需要的部分、保留其余键与格式（缩进两空格、UTF-8、结尾换行）；
+3. 写入使用「临时文件 + 原子 rename」，避免 ZCode 运行时读到半截文件；
+4. 不认识的键不要删除或改写。
+
 ## 打包
 
 第三方声明生成、发行校验流程及声明在发行物中的位置见 [third-party/README.md](third-party/README.md)。

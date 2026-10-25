@@ -11,6 +11,12 @@ export interface AgentRuntimeHookMethods {
     signal?: AbortSignal,
     model?: Pick<Model, "providerId" | "modelId">,
   ): Promise<HookRunResult>;
+
+  runSessionEndHooks(
+    reason: "close" | "deactivate" | "exit",
+    traceContext: TraceContext,
+    signal?: AbortSignal,
+  ): Promise<void>;
   runUserPromptSubmitHooks(
     prompt: string,
     attachments: TurnState["attachments"] | undefined,

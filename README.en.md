@@ -139,6 +139,91 @@ The root [.env.example](.env.example) provides sample service URLs and build con
 
 Runtime variables can be set explicitly in the environment of the startup command. See [config/README.md](config/README.md) for the default configuration shipped with the client.
 
+## Hooks Configuration Reference
+
+ZCode hooks are declared under the `hooks` key of a JSON config file in one of two scopes:
+
+| Scope | File path | Effect |
+| ----- | --------- | ------ |
+| User | `~/.zcode/cli/config.json` | Applies to all workspaces |
+| Workspace | `<workspace>/.zcode/config.json` | Applies to that workspace only (requires trust review) |
+
+### Structure (strictly validated)
+
+The `hooks` object **only allows the following top-level keys**; any extra key makes the whole `hooks` block fail validation and silently not load:
+
+```
+hooks:
+  enabled         bool, optional — master switch (defaults to on)
+  timeoutMs       positive number, optional — default timeout in ms
+  maxOutputBytes  positive number, optional — default output cap
+  events          object, optional — event name → array of matchers
+```
+
+**Event names must live under `events`**, never at the top level. There are 8 valid events:
+
+`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PermissionRequest` / `PostToolUse` / `PostToolUseFailure` / `Stop` / `SessionEnd`
+
+> `SessionEnd` fires when the session runtime instance ends (connection close / session delete / resident eviction / CLI exit); it does not fire on forced process kills (server restart). It is fire-and-forget: output never enters the model context, and since an evicted session can be reopened, receivers must dedupe by idempotency.
+
+### Full example
+
+```json
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "/home/user/.zcode/hooks/notify.sh",
+              "enabled": true,
+              "async": true,
+              "timeout": 60
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            { "type": "command", "command": "echo $ZCODE_HOOK_INPUT" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+### Field reference
+
+A matcher object only allows `matcher` (optional tool-name pattern) and `hooks` (at least 1 declaration). Each declaration is one of two shapes:
+
+| Field | `type: "command"` | `type: "process"` | Notes |
+| ----- | ----------------- | ----------------- | ----- |
+| `command` | required | required | Command or executable |
+| `enabled` | optional | optional | Defaults to enabled |
+| `async`   | optional | — | Fire-and-forget execution |
+| `shell`   | optional (`true` or a shell path) | — | Explicit shell |
+| `timeout` / `timeoutMs` | optional (seconds / ms) | optional (`timeoutMs`) | Per-hook timeout, default 60s |
+| `args`    | — | optional | Process arguments |
+| `statusMessage` | optional | optional | Display label |
+
+### Notes for external tools writing this file
+
+The `hooks` block is validated in **strict mode**: any unknown key (for example an event name placed at the top level of `hooks`) causes the **entire hooks block to stop loading silently** — nothing shows up in the UI and no error is raised. While in that state, saving any hooks change from the settings page rewrites `events` from the currently displayed list and may erase declarations that failed to load.
+
+Third-party tools (notifiers, state trackers, etc.) that write this file must follow:
+
+1. Event names may only appear as keys of `hooks.events`; the top level of `hooks` allows only `enabled` / `events` / `timeoutMs` / `maxOutputBytes`;
+2. Read the file first, touch only what you need, and keep everything else intact (2-space indent, UTF-8, trailing newline);
+3. Write via temp file + atomic rename so the ZCode runtime never reads a partial file;
+4. Never delete or rewrite keys you do not recognize.
+
 ## Packaging
 
 See [third-party/README.md](third-party/README.md) for notice generation, distribution checks, and where the notices are included in each distribution.

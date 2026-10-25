@@ -291,6 +291,13 @@ export function createSessionFacade(deps: CreateSessionFacadeDeps): SessionFacad
         // 关闭入口先阻止新调度并取消在飞 Memory Extraction，再等待取消链路收口。
         deps.runtime.beginShutdown();
         await deps.runtime.drainMemoryExtractions(60_000);
+        // SessionEnd hooks：所有会话结束路径（close/delete/deactivate/exit）都汇聚到
+        // 本函数。即发即忘 + 独立短超时（10s）：不读输出、不阻断后续资源释放、失败只记
+        // 日志——hook 卡死最坏拖慢关闭 10s，不会影响 closeSessionResources 的收口。
+        await Promise.race([
+          deps.runtime.runSessionEndHooks("close", deps.traceContext),
+          new Promise<void>((resolve) => setTimeout(resolve, 10_000).unref?.()),
+        ]).catch(() => undefined);
         // 引擎归本 App 所有，所以关闭要主动停下它。
         // 位置是两个约束夹出来的：在 beginShutdown **之后**，结算带出的终态通知才会被丢掉
         // （background-notifications.ts 在 shuttingDown 时不入队），不会把正在关闭的会话的模型
