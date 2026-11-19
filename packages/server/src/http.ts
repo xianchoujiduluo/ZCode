@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { hostname, userInfo } from "node:os";
 import * as nodePath from "node:path";
-import { basename, extname, resolve } from "node:path";
+import { basename, extname, isAbsolute, resolve } from "node:path";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -18,7 +18,10 @@ import {
   type ISocket,
 } from "@zcode/rpc";
 import type { TopicResourcePeers } from "@zcode/services/node";
-import { TOPIC_RESOURCE_RELAY_CHANNEL } from "@zcode/shared";
+import {
+  TOPIC_RESOURCE_RELAY_CHANNEL,
+  buildServerRemoteWorkspaceIdentity,
+} from "@zcode/shared";
 import {
   ServiceCollection,
   IZCodeAgentService,
@@ -170,12 +173,36 @@ function resolveServerWorkspaces(options: HttpServerOptions): ServerRemoteWorksp
     return options.workspaces;
   }
   const workspacePath = readTrimmedEnv("ZCODE_SERVER_WORKSPACE") || process.cwd();
+  // 必须下发 workspaceIdentity：独立 Server 的存储 ownerHostId 由 serverId 派生
+  // （remote:server:<id>），而 Web 端 hostId 只能从 workspaceIdentity 里解析。
+  // 缺了它，UI 会回退成 "local"，与 ownerHostId 不等，服务端 project route()
+  // 直接抛 project.host-offline，表现为发送消息失败。
+  const workspaceIdentity = buildWorkspaceIdentityOption(options, workspacePath);
   return [
     {
       path: workspacePath,
       label: basename(workspacePath) || workspacePath,
+      ...(workspaceIdentity ? { workspaceIdentity } : {}),
     },
   ];
+}
+
+function buildWorkspaceIdentityOption(
+  options: HttpServerOptions,
+  workspacePath: string,
+): string | undefined {
+  // 身份契约只接受 posix 绝对路径；相对路径宁可不给，也不产出错误的身份键。
+  if (!isAbsolute(workspacePath)) return undefined;
+  try {
+    return buildServerRemoteWorkspaceIdentity({
+      serverId: resolveHttpServerId(options),
+      workspacePath,
+    });
+  } catch {
+    // serverId 归一后为空（例如全是非法字符）时 buildServerRemoteWorkspaceIdentity 会抛错；
+    // 这属于部署配置错误，但不应让 server-info 整体 500。
+    return undefined;
+  }
 }
 
 function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {

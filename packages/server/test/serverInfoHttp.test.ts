@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ServiceCollection } from "@zcode/services";
-import { SERVER_REMOTE_PROTOCOL_VERSION } from "@zcode/shared";
+import { SERVER_REMOTE_PROTOCOL_VERSION, remoteHostIdFromWorkspaceIdentity } from "@zcode/shared";
 import { createHttpServer } from "../src/http.js";
 
 describe("server info HTTP endpoint", () => {
@@ -73,6 +73,40 @@ describe("server info HTTP endpoint", () => {
         processResourceTelemetry: true,
       },
     });
+  });
+
+  // 独立 Server 的存储 ownerHostId 是 remote:server:<serverId>，Web 端只能从
+  // workspaceIdentity 解析 hostId。少了它 UI 会回退成 "local"，与 ownerHostId
+  // 不等，发送消息时 project route() 直接抛 project.host-offline。
+  it("derives workspaceIdentity for the default workspace from the server id", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "zcode-server-info-identity-"));
+    tempDirs.push(workspacePath);
+    const previousWorkspace = process.env["ZCODE_SERVER_WORKSPACE"];
+    process.env["ZCODE_SERVER_WORKSPACE"] = workspacePath;
+    try {
+      const server = createHttpServer(new ServiceCollection(), 0, {
+        serverId: "Owner-Host",
+      });
+      servers.push(server);
+      const address = server.address() as AddressInfo;
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/server-info`);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        workspaces: Array<{ path: string; workspaceIdentity?: string }>;
+      };
+      expect(body.workspaces[0]?.path).toBe(workspacePath);
+      const identity = body.workspaces[0]?.workspaceIdentity;
+      if (!identity) throw new Error("server-info 未下发 workspaceIdentity");
+      // 真正要守的契约：Web 端从 identity 解出的 hostId 必须等于存储的
+      // ownerHostId（= remote:server:<归一后的 serverId>），否则路由会抛
+      // project.host-offline。完整字符串留给身份工具自己演化。
+      expect(remoteHostIdFromWorkspaceIdentity(identity)).toBe("remote:server:owner-host");
+    } finally {
+      if (previousWorkspace === undefined) delete process.env["ZCODE_SERVER_WORKSPACE"];
+      else process.env["ZCODE_SERVER_WORKSPACE"] = previousWorkspace;
+    }
   });
 
   it("announces virtual projects only for an initialized owner host", async () => {
