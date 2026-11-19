@@ -82,10 +82,20 @@ export function createProjectService(options: {
   afterChange?: () => Promise<void>;
 }): IProjectService {
   const route = async (hostId?: string) => {
-    if (!hostId || hostId === (options.ownerHostId ?? "local")) return null;
+    // "local" 是「本机」的协议级别名，与省略 Host 等价。独立部署（Web + Agent）
+    // 的存储 ownerHostId 是 remote:server:<serverId>，而浏览器直连的 UI 永远只知道
+    // 自己是本机，发来的是 "local"。不认这个别名时会抛 project.host-offline，
+    // 表现为发送消息失败。真正的远端 hostId 仍走 resolveHost / 离线拒绝。
+    if (!hostId || hostId === "local" || hostId === (options.ownerHostId ?? "local")) return null;
     if (!options.resolveHost) throw new Error("project.host-offline");
     return options.resolveHost(hostId);
   };
+  /**
+   * 请求是否指向别的 Host。存储 ownerHostId 非 local 只说明本进程的存储归属，
+   * 不代表调用方在操作远端：浏览器直连时它发的仍是 "local"。远端项目才有
+   * 「必须先建项目」「单根」这类约束。
+   */
+  const targetsRemoteHost = (hostId?: string) => Boolean(hostId) && hostId !== "local";
   const creationFlights = new Map<string, Promise<ProjectDirectories>>();
   const changed = async () => {
     await options.afterChange?.();
@@ -206,9 +216,9 @@ export function createProjectService(options: {
       const remote = await route(params?.hostId);
       if (remote) return remote.prepareSession({ projectId: params?.projectId });
       const id = params?.projectId;
-      const remoteOwner = Boolean(options.ownerHostId && options.ownerHostId !== "local");
+      const remoteRequest = targetsRemoteHost(params?.hostId);
       // 旧入口可绕过项目直接在远端 mkdir；必须在目录或会话副作用之前拒绝。
-      if (remoteOwner && !id) throw new Error("project.remote-project-required");
+      if (remoteRequest && !id) throw new Error("project.remote-project-required");
       if (id && creationFlights.has(id)) return creationFlights.get(id)!;
       const flight = (async (): Promise<ProjectDirectories> => {
         if (!id) {
@@ -230,7 +240,7 @@ export function createProjectService(options: {
           .readTree({ includeTasks: false })
           .projects.find((item) => item.id === id);
         if (!project) throw new Error("project.not-found");
-        if (remoteOwner && project.roots.length !== 1)
+        if (remoteRequest && project.roots.length !== 1)
           throw new Error("project.remote-single-root-required");
         if (!project.roots.length) {
           // 多窗口为同一空项目生成同一个目录，不依赖进程间定时锁。

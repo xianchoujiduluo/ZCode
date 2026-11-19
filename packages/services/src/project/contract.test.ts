@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -238,6 +239,52 @@ it("routes every foreign project operation to its existing owner and never falls
   for (const method of Object.values(remote)) expect(method).toHaveBeenCalledTimes(1);
   expect(repository).not.toHaveBeenCalled();
   await expect(service.readTree({ hostId: "offline" })).rejects.toThrow("project.host-offline");
+  expect(repository).not.toHaveBeenCalled();
+});
+
+// 独立部署（Web + Agent）的存储 ownerHostId 是 remote:server:<serverId>，
+// 但浏览器直连的 UI 只会发 "local"。这里锁定：不要把它当远端而拒绝。
+it("treats the local alias as the storage owner even when ownerHostId is server scoped", async () => {
+  const root = await mkdtemp(join(tmpdir(), "zcode-project-local-alias-"));
+  try {
+    const readTree = vi.fn(() => ({ projects: [], tasks: [] }));
+    const repository = { readTree } as unknown as ProjectRepositoryContract;
+    const service = createProjectService({
+      repository: async () => repository,
+      workspaceDirectory: root,
+      ownerHostId: "remote:server:host-a",
+    });
+
+    await expect(service.readTree({ hostId: "local" })).resolves.toEqual({
+      projects: [],
+      tasks: [],
+    });
+    // 省略 Host 与显式 local 必须走同一条本地路径。
+    await expect(service.readTree()).resolves.toEqual({ projects: [], tasks: [] });
+    expect(readTree).toHaveBeenCalledTimes(2);
+
+    // 本地草稿不需要先建项目（远端才需要 remote-project-required）。
+    const directories = await service.prepareSession({ hostId: "local", draftId: randomUUID() });
+    expect(directories.projectId).toBeNull();
+    expect(directories.workspacePath.startsWith(root)).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("keeps remote host requests strict when storage is server scoped", async () => {
+  const repository = vi.fn(async () => {
+    throw new Error("must not read local storage");
+  });
+  const service = createProjectService({
+    repository,
+    workspaceDirectory: tmpdir(),
+    ownerHostId: "remote:server:host-a",
+  });
+  // 没有 resolveHost：既不是 local 也不是 owner 的 hostId 必须离线拒绝。
+  await expect(service.readTree({ hostId: "remote:server:host-b" })).rejects.toThrow(
+    "project.host-offline",
+  );
   expect(repository).not.toHaveBeenCalled();
 });
 
